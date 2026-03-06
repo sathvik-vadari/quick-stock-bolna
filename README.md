@@ -1,7 +1,5 @@
 # QuickStock — AI Voice Store Availability Checker
 
-> **Bolna Full-Stack Assignment** | Built by [Your Name]
-
 A voice AI platform that automatically calls nearby stores to check product availability, pricing, and delivery options — saving customers the time of calling stores manually.
 
 ## The Problem
@@ -37,15 +35,15 @@ Next.js Frontend (frontend/)
 
 ## Tech Stack
 
-| Layer      | Tech |
-|------------|------|
-| Backend    | FastAPI + Uvicorn, Python 3.12 |
-| Database   | PostgreSQL |
-| Voice AI   | **Bolna** (outbound calls) |
-| LLMs       | Azure OpenAI (GPT-4o), Google Gemini 2.0 Flash |
-| Store Discovery | Google Maps Places API |
-| Online Deals | Gemini with Google Search grounding |
-| Frontend   | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui |
+| Layer           | Tech                                                      |
+| --------------- | --------------------------------------------------------- |
+| Backend         | FastAPI + Uvicorn, Python 3.12                            |
+| Database        | PostgreSQL                                                |
+| Voice AI        | **Bolna** (outbound calls)                                |
+| LLMs            | Azure OpenAI (GPT-4o), Google Gemini 2.0 Flash            |
+| Store Discovery | Google Maps Places API                                    |
+| Online Deals    | Gemini with Google Search grounding                       |
+| Frontend        | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui |
 
 ## Project Structure
 
@@ -76,6 +74,7 @@ voice-serve-bolna/
 Go to [app.bolna.dev](https://app.bolna.dev) and create a new **outbound** agent:
 
 **Agent Settings:**
+
 - **Agent Type:** Outbound
 - **Synthesizer (TTS):** Cartesia (recommended) or ElevenLabs
 - **Transcriber (STT):** Deepgram
@@ -88,11 +87,11 @@ Go to [app.bolna.dev](https://app.bolna.dev) and create a new **outbound** agent
 
 **Tools to add** (under the agent's "Tools" section):
 
-| Tool name | Description |
-|-----------|-------------|
+| Tool name                     | Description                                              |
+| ----------------------------- | -------------------------------------------------------- |
 | `report_product_availability` | Reports if the product is available, its price and specs |
-| `report_delivery_info` | Reports delivery yes/no and ETA |
-| `report_alternative_product` | Reports an alternative product the store suggested |
+| `report_delivery_info`        | Reports delivery yes/no and ETA                          |
+| `report_alternative_product`  | Reports an alternative product the store suggested       |
 
 Each tool should be a **webhook** tool pointing to:
 `POST {{BOLNA_SERVER_URL}}/api/bolna/tool` (or use Bolna's native tool format)
@@ -151,30 +150,31 @@ Frontend starts at `http://localhost:3000`
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string (default: `postgresql://postgres:postgres@localhost:5432/quickstock`) |
-| `AZURE_OPENAI_API_KEY` | Your Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint (e.g. `https://az-openai-shared.openai.azure.com/`) |
-| `AZURE_OPENAI_API_VERSION` | API version (default: `2025-04-01-preview`) |
-| `AZURE_OPENAI_DEPLOYMENT` | Deployment name in Azure (default: `gpt-4o`) |
-| `BOLNA_API_KEY` | Bolna API key |
-| `BOLNA_AGENT_ID` | Bolna agent ID |
-| `BOLNA_SERVER_URL` | Your public webhook URL |
-| `GOOGLE_MAPS_API_KEY` | Google Maps Places API key |
-| `GEMINI_API_KEY` | Google Gemini API key |
+| Variable                   | Description                                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`             | PostgreSQL connection string (default: `postgresql://postgres:postgres@localhost:5432/quickstock`) |
+| `AZURE_OPENAI_API_KEY`     | Your Azure OpenAI API key                                                                          |
+| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI endpoint (e.g. `https://az-openai-shared.openai.azure.com/`)                          |
+| `AZURE_OPENAI_API_VERSION` | API version (default: `2025-04-01-preview`)                                                        |
+| `AZURE_OPENAI_DEPLOYMENT`  | Deployment name in Azure (default: `gpt-4o`)                                                       |
+| `BOLNA_API_KEY`            | Bolna API key                                                                                      |
+| `BOLNA_AGENT_ID`           | Bolna agent ID                                                                                     |
+| `BOLNA_SERVER_URL`         | Your public webhook URL                                                                            |
+| `GOOGLE_MAPS_API_KEY`      | Google Maps Places API key                                                                         |
+| `GEMINI_API_KEY`           | Google Gemini API key                                                                              |
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/ticket` | Submit a product query |
-| `GET` | `/api/ticket/{id}` | Poll for status + progress |
-| `GET` | `/api/ticket/{id}/options` | Get final results |
-| `POST` | `/api/bolna/webhook` | Bolna calls this when each store call ends |
-| `GET` | `/health` | Health check |
+| Method | Path                       | Description                                |
+| ------ | -------------------------- | ------------------------------------------ |
+| `POST` | `/api/ticket`              | Submit a product query                     |
+| `GET`  | `/api/ticket/{id}`         | Poll for status + progress                 |
+| `GET`  | `/api/ticket/{id}/options` | Get final results                          |
+| `POST` | `/api/bolna/webhook`       | Bolna calls this when each store call ends |
+| `GET`  | `/health`                  | Health check                               |
 
 **Create ticket:**
+
 ```json
 POST /api/ticket
 {
@@ -186,6 +186,7 @@ POST /api/ticket
 ```
 
 **Options response (after completion):**
+
 ```json
 GET /api/ticket/TKT-001/options
 {
