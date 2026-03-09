@@ -1,6 +1,8 @@
 # QuickStock
 
-Multi-LLM voice commerce platform for India — submit a product query and location, and QuickStock **calls nearby stores on the phone**, extracts availability, pricing, and delivery info from live conversations, then compares it all against online deals. What takes a customer 15–20 minutes of manual calling, QuickStock does in under 2 minutes with parallel outbound calls.
+Multi-LLM voice commerce platform for India — type what you need, and QuickStock **calls nearby stores on the phone**, checks availability, pricing, and delivery from live conversations, and compares it all against online deals.
+
+You want a product. You don't know which store has it, what the fair price is, whether they deliver, or if there's a better deal online. Finding out means 30+ minutes of Googling, calling stores that don't pick up, and comparing half-remembered prices — and you still aren't sure you got the best option. QuickStock calls up stores simultaneously, gets real answers from real conversations, pulls online deals in parallel, scores everything, and hands you a ranked comparison — in the time it takes one store to answer the phone. Plug in a logistics provider and the item shows up at your door. One query, full circle.
 
 ## How It Works
 
@@ -14,7 +16,7 @@ User submits query + location
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Product Research   │  ← Azure OpenAI GPT-4o: specs, price tier,
+│   Product Research   │  ← Azure OpenAI GPT-5.3: specs, price tier,
 │                      │     preferred retailers, alternatives,
 │                      │     Google Maps search terms
 └──────────┬───────────┘
@@ -44,11 +46,11 @@ User submits query + location
 │    Bolna outbound    │                              │
 │    parallel calls    │                              │
 │                      │                              │
-│  ┌──────────────────┐│                              │
-│  │ no answer? retry ││                              │
-│  │ busy? retry once ││                              │
-│  │ failed? mark it  ││                              │
-│  └──────────────────┘│                              │
+│ ┌──────────────────┐ │                              │
+│ │ no answer? retry │ │                              │
+│ │ busy? retry once │ │                              │
+│ │ failed? mark it  │ │                              │
+│ └──────────────────┘ │                              │
 └──────────┬───────────┘                              │
            ▼                                          │
 ┌──────────────────────┐                              │
@@ -74,7 +76,7 @@ User submits query + location
 
 ## What Makes This Complex
 
-- **5 LLM calls per ticket** across two providers (Azure OpenAI + Google Gemini), each with different strengths — Gemini for search-grounded web data, GPT-4o for structured extraction
+- **5 LLM calls per ticket** across two providers (Azure OpenAI + Google Gemini), each with different strengths — Gemini for search-grounded web data, GPT for structured extraction
 - **Parallel outbound phone calls** to real stores via Bolna voice AI, with automatic retry on no-answer/busy (120s backoff, one retry per store)
 - **4 parallel web searches** via Gemini with Google Search grounding, each targeting a different angle (price comparison, deals, quick commerce, niche platforms)
 - **Smart store prioritization** — named stores get exact-match priority; preferred retailers are boosted for premium products; budget queries favor proximity
@@ -90,7 +92,7 @@ User submits query + location
 | Backend         | FastAPI + Uvicorn, Python 3.12                            |
 | Database        | PostgreSQL (raw SQL, no ORM — 7 tables)                   |
 | Voice AI        | Bolna (outbound calls, Deepgram STT, Cartesia TTS)        |
-| LLMs            | Azure OpenAI GPT-4o, Google Gemini 2.0 Flash              |
+| LLMs            | Azure OpenAI GPT-5.3, Google Gemini 3.0 Flash             |
 | Store Discovery | Google Maps Places API (New) + Geocoding API              |
 | Online Deals    | Gemini with Google Search grounding (4 parallel searches) |
 | Frontend        | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui |
@@ -127,10 +129,10 @@ app/
 │   └── regional.py                # City detection → language/greeting/style
 ├── prompts/                       # LLM prompt templates (.txt)
 │   ├── query_analyzer.txt         # Gemini: intent + search strategy
-│   ├── product_research.txt       # GPT-4o: specs + alternatives
+│   ├── product_research.txt       # GPT-5.3: specs + alternatives
 │   ├── store_caller.txt           # Bolna agent system prompt
-│   ├── transcript_analyzer.txt    # GPT-4o: structured call extraction
-│   ├── options_summary.txt        # GPT-4o: user-facing verdict
+│   ├── transcript_analyzer.txt    # GPT-5.3: structured call extraction
+│   ├── options_summary.txt        # GPT-5.3: user-facing verdict
 │   └── web_deals.txt              # Gemini: deal synthesis
 ├── routes/
 │   ├── ticket_routes.py           # REST + SSE + dashboard endpoints
@@ -202,17 +204,7 @@ Seven tables, auto-created on first boot:
 
 ## Regional Support
 
-QuickStock auto-detects the city from the location string and adapts the voice agent's language and style:
-
-| Region    | Cities                                              | Language | Style                                     |
-| --------- | --------------------------------------------------- | -------- | ----------------------------------------- |
-| Bangalore | Bengaluru, HSR Layout, Koramangala, Whitefield, ... | Kannada  | Kannada if store initiates, else Hinglish |
-| Delhi NCR | Delhi, Noida, Gurgaon, Faridabad, Ghaziabad, ...    | Hindi    | Hindi with ji/bhaiya                      |
-| Mumbai    | Mumbai, Navi Mumbai, Bandra, Andheri, Thane, ...    | Marathi  | Marathi if store initiates, else Hinglish |
-| Chennai   | Chennai, Anna Nagar, T Nagar, Adyar, ...            | Tamil    | Tamil if store initiates, else English    |
-| Hyderabad | Hyderabad, Secunderabad, HiTech City, ...           | Telugu   | Telugu if store initiates, else Hinglish  |
-| Kolkata   | Kolkata, Salt Lake, Howrah, Park Street, ...        | Bengali  | Bengali if store initiates, else Hinglish |
-| Default   | All other cities                                    | Hindi    | Hinglish with ji/bhaiya                   |
+Calls are always in Hindi/Hinglish, but the voice agent adapts its tone, greetings, and honorifics per city — "dada" in Kolkata, "saar" in Bangalore, "bhai" in Mumbai — auto-detected from the location string.
 
 ## API Endpoints
 
@@ -291,9 +283,9 @@ GET /api/ticket/TKT-001/options
 
 Go to [app.bolna.dev](https://app.bolna.dev) and create a new **outbound** agent:
 
-- **Synthesizer (TTS):** Cartesia
+- **Synthesizer (TTS):** ElevenLabs
 - **Transcriber (STT):** Deepgram
-- **LLM:** GPT-4o
+- **LLM:** GPT-5.3
 - **First message:** `Hello, is this {{user_data.store_name}}?`
 - **System Prompt:** paste the contents of `app/prompts/store_caller.txt`
 
