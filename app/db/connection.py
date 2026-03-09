@@ -57,6 +57,13 @@ def get_cursor(conn):
 
 
 def init_db() -> None:
+    try:
+        _init_db_tables()
+    except Exception as e:
+        logger.warning("init_db skipped (likely already created by another worker): %s", e)
+
+
+def _init_db_tables() -> None:
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute("""
