@@ -108,7 +108,7 @@ The frontend ships with a full operational dashboard:
 - **Activity area chart** — query volume over the last 24 hours
 - **Recent queries list** — live status dots (pulsing blue for active, green for completed, red for failed), ticket ID, product, location, call summary ratio, relative timestamps
 - **Query panel** — submit a product + location + phone, then watch the 5-stage pipeline progress in real time with per-store call status, prices as they come in, and an online deals preview
-- **Ticket detail view** — full results with ranked store option cards (match type badges, delivery info, pricing), transcript viewer (chat-bubble format with bot/user turns), web deals carousel with confidence scoring and "Best Deal" banners
+- **Ticket detail view** — full results with ranked store option cards (match type badges, delivery info, pricing), transcript viewer, web deals with confidence scoring and "Best Deal" banners
 - **Retry mechanism** — when all calls fail, users can refine their query and adjust max stores (1–10) directly from the results view
 
 All updates are **SSE-driven** — no polling. The frontend subscribes to `GET /api/ticket/{id}/events` and every status change, transcript arrival, and analysis result pushes instantly.
@@ -319,26 +319,6 @@ cd frontend
 bun install
 bun run dev                # start on :3000
 ```
-
-## Environment Variables
-
-| Variable                   | Description                                 | Default                                                    |
-| -------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
-| `DATABASE_URL`             | PostgreSQL connection string                | `postgresql://postgres:postgres@localhost:5432/quickstock` |
-| `BOLNA_API_KEY`            | Bolna API key                               | —                                                          |
-| `BOLNA_AGENT_ID`           | Bolna outbound agent ID                     | —                                                          |
-| `BOLNA_SERVER_URL`         | Public webhook URL (ngrok during dev)       | —                                                          |
-| `AZURE_OPENAI_API_KEY`     | Azure OpenAI API key                        | —                                                          |
-| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI endpoint                       | —                                                          |
-| `AZURE_OPENAI_API_VERSION` | API version                                 | `2025-04-01-preview`                                       |
-| `AZURE_OPENAI_DEPLOYMENT`  | Deployment name                             | `gpt-4o`                                                   |
-| `GOOGLE_MAPS_API_KEY`      | Google Maps Places + Geocoding API key      | —                                                          |
-| `GEMINI_API_KEY`           | Google Gemini API key                       | —                                                          |
-| `GEMINI_MODEL`             | Gemini model                                | `gemini-flash-latest`                                      |
-| `MAX_STORES_TO_CALL`       | Max parallel Bolna calls per ticket         | `4`                                                        |
-| `MAX_ALTERNATIVES`         | Max product alternatives to research        | `3`                                                        |
-| `TEST_MODE`                | Call your own number instead of real stores | `false`                                                    |
-| `TEST_PHONE`               | Your phone number for test mode             | —                                                          |
 
 ## License
 
