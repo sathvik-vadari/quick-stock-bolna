@@ -26,6 +26,11 @@ export interface TicketResponse {
   message: string;
 }
 
+export interface TranscriptMessage {
+  role: "assistant" | "user" | string;
+  content: string;
+}
+
 export interface StoreCall {
   id: number;
   store_id: number;
@@ -46,6 +51,7 @@ export interface StoreCall {
   rating: number | null;
   address: string | null;
   transcript: string | null;
+  transcript_json: TranscriptMessage[] | null;
 }
 
 export interface TicketStatus {
@@ -150,7 +156,7 @@ export interface DashboardStats {
     in_progress: number;
   };
   stores_contacted: number;
-  daily_activity: { day: string; count: number }[];
+  hourly_activity: { hour: string; count: number }[];
   completed: number;
   failed: number;
   in_progress: number;

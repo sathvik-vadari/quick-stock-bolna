@@ -12,9 +12,16 @@ Compare what the store confirmed against what the customer wanted. For EACH spec
 - Did the store confirm it?
 - Does it match what the customer wanted?
 
+CRITICAL RULES for product_available:
+- Set to TRUE if the store has the requested product OR any variant/alternative of it (different brand, size, material, model).
+  A store that offers an alternative (e.g. metal bottle instead of plastic, 2L instead of 2.5L, different brand) counts as TRUE with product_match_type "alternative" or "close".
+- Set to FALSE ONLY if the store explicitly says they have NOTHING related to the request at all.
+- Set to NULL only if the call didn't connect or availability info was not obtained.
+- When in doubt, lean toward TRUE with a lower specs_match_score rather than FALSE.
+
 Respond with ONLY a JSON object (no markdown, no extra text):
 {
-    "product_available": true or false or null (null if call didn't connect or info not obtained),
+    "product_available": true or false or null (see rules above),
     "matched_product": "exact product name as confirmed by the store, or null",
     "price": 999.99 or null,
     "delivery_available": true or false or null,

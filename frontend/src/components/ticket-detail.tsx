@@ -15,8 +15,16 @@ import {
   type TicketStatus,
   type OptionsResponse,
   type OptionItem,
+  type StoreCall,
   type WebDeal,
 } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   ArrowLeft,
   Loader2,
@@ -41,6 +49,9 @@ import {
   ShieldAlert,
   Shield,
   Trophy,
+  MessageSquare,
+  Bot,
+  User,
 } from "lucide-react";
 
 const PIPELINE_STEPS = [
@@ -105,10 +116,151 @@ function PipelineProgress({ status }: { status: string }) {
   );
 }
 
+function parseTranscriptToMessages(
+  transcript: string
+): { role: "assistant" | "user"; content: string }[] {
+  const msgs: { role: "assistant" | "user"; content: string }[] = [];
+  const lines = transcript.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const assistantMatch = trimmed.match(/^assistant:\s*(.+)/i);
+    const userMatch = trimmed.match(/^user:\s*(.+)/i);
+    if (assistantMatch) {
+      msgs.push({ role: "assistant", content: assistantMatch[1].trim() });
+    } else if (userMatch) {
+      msgs.push({ role: "user", content: userMatch[1].trim() });
+    } else if (msgs.length > 0) {
+      msgs[msgs.length - 1].content += " " + trimmed;
+    }
+  }
+  return msgs;
+}
+
+function ChatBubble({ role, content }: { role: string; content: string }) {
+  const isBot = role === "assistant";
+  return (
+    <div className={`flex gap-2.5 ${isBot ? "" : "flex-row-reverse"}`}>
+      <div
+        className={`h-7 w-7 rounded-full shrink-0 flex items-center justify-center mt-0.5 ${
+          isBot
+            ? "bg-blue-500/15 text-blue-400"
+            : "bg-emerald-500/15 text-emerald-400"
+        }`}
+      >
+        {isBot ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+      </div>
+      <div
+        className={`rounded-2xl px-3.5 py-2 max-w-[78%] text-[13px] leading-relaxed ${
+          isBot
+            ? "bg-muted/70 text-foreground rounded-tl-sm"
+            : "bg-blue-500/15 text-foreground rounded-tr-sm"
+        }`}
+      >
+        {content}
+      </div>
+    </div>
+  );
+}
+
+function TranscriptDialog({
+  call,
+  open,
+  onOpenChange,
+}: {
+  call: StoreCall | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!call) return null;
+
+  const structured = call.transcript_json;
+  const messages =
+    structured && structured.length > 0
+      ? structured
+      : call.transcript
+        ? parseTranscriptToMessages(call.transcript)
+        : [];
+
+  const summary =
+    call.call_analysis &&
+    typeof (call.call_analysis as Record<string, string>).call_summary === "string"
+      ? (call.call_analysis as Record<string, string>).call_summary
+      : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl p-0 gap-0 max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Fixed header */}
+        <div className="px-5 pt-5 pb-3 border-b shrink-0">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Store className="h-4 w-4" />
+              {call.store_name}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                {call.phone_number && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Phone className="h-3 w-3" /> {call.phone_number}
+                  </span>
+                )}
+                {call.product_available != null && (
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${
+                      call.product_available
+                        ? "text-green-400 border-green-500/20 bg-green-500/10"
+                        : "text-red-400 border-red-500/20 bg-red-500/10"
+                    }`}
+                  >
+                    {call.product_available ? "Available" : "Not available"}
+                  </Badge>
+                )}
+                {call.product_match_type && call.product_match_type !== "no_data" && (
+                  <Badge variant="outline" className="text-[10px]">
+                    {call.product_match_type} match
+                  </Badge>
+                )}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        {/* Scrollable chat area */}
+        <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 scrollbar-none">
+          {messages.length > 0 ? (
+            <div className="space-y-3">
+              {messages.map((msg, i) => (
+                <ChatBubble key={i} role={msg.role} content={msg.content} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              No transcript available for this call.
+            </p>
+          )}
+        </div>
+
+        {/* Fixed footer summary */}
+        {summary && (
+          <div className="px-5 py-3 border-t bg-muted/30 shrink-0">
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">AI Summary</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {summary}
+            </p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CallsProgress({ status }: { status: TicketStatus }) {
   const calls = status.store_calls;
   if (!calls?.length) return null;
   const prog = status.progress;
+  const [selectedCall, setSelectedCall] = useState<StoreCall | null>(null);
 
   return (
     <div className="space-y-2">
@@ -119,47 +271,72 @@ function CallsProgress({ status }: { status: TicketStatus }) {
         </p>
       </div>
       <div className="space-y-1.5">
-        {calls.map((c) => (
-          <div
-            key={c.id}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/30"
-          >
-            <div
-              className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                c.status === "analyzed"
-                  ? c.product_available
-                    ? "bg-green-500"
-                    : "bg-red-400"
-                  : c.status === "failed"
-                  ? "bg-red-600"
-                  : c.status === "calling" || c.status === "transcript_received"
-                  ? "bg-blue-400 animate-pulse"
-                  : "bg-muted-foreground/30"
+        {calls.map((c) => {
+          const hasTranscript = !!(c.transcript || c.transcript_json);
+          return (
+            <button
+              key={c.id}
+              onClick={() => hasTranscript && setSelectedCall(c)}
+              disabled={!hasTranscript}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/30 w-full text-left transition-colors ${
+                hasTranscript ? "hover:bg-muted/50 cursor-pointer" : ""
               }`}
-            />
-            <span className="text-sm text-foreground truncate flex-1">
-              {c.store_name}
-            </span>
-            {c.status === "analyzed" && c.product_available && c.price && (
-              <Badge variant="secondary" className="text-xs gap-1 text-green-400">
-                <Tag className="h-3 w-3" />
-                ₹{c.price}
-              </Badge>
-            )}
-            {c.status === "analyzed" && c.product_available === false && (
-              <span className="text-xs text-muted-foreground">unavailable</span>
-            )}
-            {(c.status === "calling" || c.status === "transcript_received") && (
-              <Loader2 className="h-3 w-3 text-blue-400 animate-spin shrink-0" />
-            )}
-          </div>
-        ))}
+            >
+              <div
+                className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                  c.status === "analyzed"
+                    ? c.product_available
+                      ? "bg-green-500"
+                      : "bg-red-400"
+                    : c.status === "failed"
+                    ? "bg-red-600"
+                    : c.status === "calling" || c.status === "transcript_received"
+                    ? "bg-blue-400 animate-pulse"
+                    : "bg-muted-foreground/30"
+                }`}
+              />
+              <span className="text-sm text-foreground truncate flex-1">
+                {c.store_name}
+              </span>
+              {c.status === "analyzed" && c.product_available && c.price && (
+                <Badge variant="secondary" className="text-xs gap-1 text-green-400">
+                  <Tag className="h-3 w-3" />
+                  ₹{c.price}
+                </Badge>
+              )}
+              {c.status === "analyzed" && c.product_available === false && (
+                <span className="text-xs text-muted-foreground">unavailable</span>
+              )}
+              {(c.status === "calling" || c.status === "transcript_received") && (
+                <Loader2 className="h-3 w-3 text-blue-400 animate-spin shrink-0" />
+              )}
+              {hasTranscript && (
+                <MessageSquare className="h-3 w-3 text-muted-foreground shrink-0" />
+              )}
+            </button>
+          );
+        })}
       </div>
+      <TranscriptDialog
+        call={selectedCall}
+        open={!!selectedCall}
+        onOpenChange={(open) => !open && setSelectedCall(null)}
+      />
     </div>
   );
 }
 
-function OptionCard({ option, rank }: { option: OptionItem; rank: number }) {
+function OptionCard({
+  option,
+  rank,
+  storeCall,
+  onViewTranscript,
+}: {
+  option: OptionItem;
+  rank: number;
+  storeCall?: StoreCall;
+  onViewTranscript?: (call: StoreCall) => void;
+}) {
   const matchColor =
     option.product_match_type === "exact"
       ? "bg-green-500/10 text-green-400 border-green-500/20"
@@ -238,15 +415,26 @@ function OptionCard({ option, rank }: { option: OptionItem; rank: number }) {
           </p>
         )}
 
-        {option.phone_number && (
-          <a
-            href={`tel:${option.phone_number}`}
-            className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            <Phone className="h-3 w-3" />
-            {option.phone_number}
-          </a>
-        )}
+        <div className="flex items-center gap-3">
+          {option.phone_number && (
+            <a
+              href={`tel:${option.phone_number}`}
+              className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <Phone className="h-3 w-3" />
+              {option.phone_number}
+            </a>
+          )}
+          {storeCall && (storeCall.transcript || storeCall.transcript_json) && onViewTranscript && (
+            <button
+              onClick={() => onViewTranscript(storeCall)}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MessageSquare className="h-3 w-3" />
+              View transcript
+            </button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -582,6 +770,13 @@ function ResultsView({
   onRetry: (ticketId: string) => void;
 }) {
   const allFailed = options.options_found === 0;
+  const storeCalls = ticket.store_calls || [];
+  const [selectedCall, setSelectedCall] = useState<StoreCall | null>(null);
+
+  const findCallForOption = (opt: OptionItem): StoreCall | undefined =>
+    storeCalls.find(
+      (c) => c.store_name === opt.store_name || c.phone_number === opt.phone_number
+    );
 
   return (
     <div className="space-y-5">
@@ -634,8 +829,61 @@ function ResultsView({
             Store Options
           </p>
           {options.options.map((opt) => (
-            <OptionCard key={opt.rank} option={opt} rank={opt.rank} />
+            <OptionCard
+              key={opt.rank}
+              option={opt}
+              rank={opt.rank}
+              storeCall={findCallForOption(opt)}
+              onViewTranscript={setSelectedCall}
+            />
           ))}
+        </div>
+      )}
+
+      {/* Show transcripts for calls that didn't result in options (unavailable, failed) */}
+      {storeCalls.some((c) => !options.options.some((o) => o.store_name === c.store_name) && (c.transcript || c.transcript_json)) && (
+        <div className="space-y-3">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <Phone className="h-3.5 w-3.5" />
+            Other Calls
+          </p>
+          <div className="space-y-1.5">
+            {storeCalls
+              .filter((c) => !options.options.some((o) => o.store_name === c.store_name))
+              .map((c) => {
+                const hasTranscript = !!(c.transcript || c.transcript_json);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => hasTranscript && setSelectedCall(c)}
+                    disabled={!hasTranscript}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/30 w-full text-left transition-colors ${
+                      hasTranscript ? "hover:bg-muted/50 cursor-pointer" : ""
+                    }`}
+                  >
+                    <div
+                      className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                        c.product_available ? "bg-green-500"
+                          : c.product_available === false ? "bg-red-400"
+                          : "bg-muted-foreground/30"
+                      }`}
+                    />
+                    <span className="text-sm text-foreground truncate flex-1">
+                      {c.store_name}
+                    </span>
+                    {c.product_available === false && (
+                      <span className="text-xs text-muted-foreground">unavailable</span>
+                    )}
+                    {c.status === "failed" && (
+                      <span className="text-xs text-muted-foreground">no answer</span>
+                    )}
+                    {hasTranscript && (
+                      <MessageSquare className="h-3 w-3 text-muted-foreground shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -646,6 +894,12 @@ function ResultsView({
           bestDeal={options.web_deals_best}
         />
       )}
+
+      <TranscriptDialog
+        call={selectedCall}
+        open={!!selectedCall}
+        onOpenChange={(open) => !open && setSelectedCall(null)}
+      />
     </div>
   );
 }

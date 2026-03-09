@@ -569,12 +569,12 @@ def get_dashboard_stats() -> dict[str, Any]:
             stores_contacted = cur.fetchone()["total"]
 
             cur.execute(
-                "SELECT DATE(created_at) AS day, COUNT(*) AS count "
+                "SELECT date_trunc('hour', created_at) AS hour, COUNT(*) AS count "
                 "FROM tickets "
-                "WHERE created_at >= NOW() - INTERVAL '14 days' "
-                "GROUP BY DATE(created_at) ORDER BY day"
+                "WHERE created_at >= NOW() - INTERVAL '24 hours' "
+                "GROUP BY date_trunc('hour', created_at) ORDER BY hour"
             )
-            daily = [{"day": str(r["day"]), "count": r["count"]} for r in cur.fetchall()]
+            hourly = [{"hour": r["hour"].isoformat(), "count": r["count"]} for r in cur.fetchall()]
 
     completed = status_counts.get("completed", 0)
     active_statuses = ("received", "analyzing", "researching", "finding_stores", "calling_stores")
@@ -587,7 +587,7 @@ def get_dashboard_stats() -> dict[str, Any]:
         "total_calls": total_calls,
         "call_outcomes": outcomes,
         "stores_contacted": stores_contacted,
-        "daily_activity": daily,
+        "hourly_activity": hourly,
         "completed": completed,
         "failed": status_counts.get("failed", 0),
         "in_progress": in_progress,
