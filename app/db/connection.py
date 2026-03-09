@@ -146,6 +146,12 @@ def init_db() -> None:
                 EXCEPTION WHEN duplicate_column THEN NULL;
                 END $$;
 
+                -- Add retry_count to store_calls (idempotent)
+                DO $$ BEGIN
+                    ALTER TABLE store_calls ADD COLUMN retry_count INTEGER DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+
                 CREATE TABLE IF NOT EXISTS llm_logs (
                     id SERIAL PRIMARY KEY,
                     ticket_id TEXT NOT NULL,

@@ -7,6 +7,7 @@ from typing import Any
 import aiohttp
 
 from app.helpers.config import Config
+from app.helpers.http_session import get_session
 from app.db.tickets import save_stores, log_tool_call
 from app.services.geocoding import geocode_address
 
@@ -61,6 +62,7 @@ async def find_stores(
     max_stores: int | None = None,
     search_queries: list[str] | None = None,
     specific_store_name: str | None = None,
+    preferred_retailers: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Search Google Maps using multiple strategies and merge results.
@@ -72,6 +74,10 @@ async def find_stores(
     When specific_store_name is set, a bare store-name search (no location)
     is prepended as the highest-priority query so the exact store is found
     even if it's outside the immediate area.
+
+    When preferred_retailers is provided (e.g. ["Croma", "Reliance Digital"]),
+    each retailer is prepended as a high-priority search query so trusted
+    chains appear before generic results.
 
     Falls back to a single search using store_search_query if search_queries
     is not given.
@@ -107,6 +113,16 @@ async def find_stores(
             prepend.append(city_query)
         queries = prepend + queries
 
+    if preferred_retailers and not specific_store_name:
+        existing_lower = {q.lower().strip() for q in queries}
+        retailer_queries = []
+        for retailer in preferred_retailers:
+            rq = f"{retailer.strip()} {city_area}"
+            if rq.lower() not in existing_lower:
+                retailer_queries.append(rq)
+                existing_lower.add(rq.lower())
+        queries = retailer_queries + queries
+
     queries_with_location = []
     for q in queries:
         low = q.lower()
@@ -118,115 +134,116 @@ async def find_stores(
     seen_place_ids: set[str] = set()
     all_places: list[tuple[int, dict]] = []
 
-    async with aiohttp.ClientSession() as session:
-        for priority, search_text in enumerate(queries_with_location):
-            start = time.time()
-            params: dict[str, Any] = {"query": search_text, "key": api_key}
+    session = await get_session()
 
-            if user_lat and user_lng:
-                params["location"] = f"{user_lat},{user_lng}"
-                params["radius"] = "50000"
+    for priority, search_text in enumerate(queries_with_location):
+        start = time.time()
+        params: dict[str, Any] = {"query": search_text, "key": api_key}
 
-            async with session.get(TEXT_SEARCH_URL, params=params) as resp:
-                data = await resp.json()
+        if user_lat and user_lng:
+            params["location"] = f"{user_lat},{user_lng}"
+            params["radius"] = "50000"
 
-            if data.get("status") != "OK":
-                logger.warning(
-                    "Google Maps search failed for %r: %s", search_text, data.get("status"),
-                )
-                log_tool_call(
-                    ticket_id, "google_maps_text_search",
-                    {"query": search_text, "strategy_priority": priority},
-                    {"status": data.get("status"), "error": data.get("error_message")},
-                    status="error", error_message=data.get("error_message"),
-                    latency_ms=int((time.time() - start) * 1000),
-                )
-                continue
+        async with session.get(TEXT_SEARCH_URL, params=params) as resp:
+            data = await resp.json()
 
-            results = data.get("results") or []
-            results.sort(
-                key=lambda r: (r.get("rating") or 0, r.get("user_ratings_total") or 0),
-                reverse=True,
+        if data.get("status") != "OK":
+            logger.warning(
+                "Google Maps search failed for %r: %s", search_text, data.get("status"),
             )
-
-            new_count = 0
-            for place in results:
-                pid = place.get("place_id")
-                if not pid or pid in seen_place_ids:
-                    continue
-                seen_place_ids.add(pid)
-                all_places.append((priority, place))
-                new_count += 1
-
             log_tool_call(
                 ticket_id, "google_maps_text_search",
                 {"query": search_text, "strategy_priority": priority},
-                {"total_found": len(results), "new_unique": new_count},
+                {"status": data.get("status"), "error": data.get("error_message")},
+                status="error", error_message=data.get("error_message"),
                 latency_ms=int((time.time() - start) * 1000),
             )
+            continue
 
-        all_places.sort(key=lambda x: (
-            x[0],
-            -(x[1].get("rating") or 0),
-            -(x[1].get("user_ratings_total") or 0),
-        ))
-        top = all_places[:max_stores * 2]
+        results = data.get("results") or []
+        results.sort(
+            key=lambda r: (r.get("rating") or 0, r.get("user_ratings_total") or 0),
+            reverse=True,
+        )
 
-        stores: list[dict[str, Any]] = []
-        for _priority, place in top:
-            place_id = place.get("place_id")
-            if not place_id:
+        new_count = 0
+        for place in results:
+            pid = place.get("place_id")
+            if not pid or pid in seen_place_ids:
                 continue
-            detail_start = time.time()
-            detail_params = {
-                "place_id": place_id,
-                "fields": (
-                    "formatted_phone_number,international_phone_number,"
-                    "name,rating,user_ratings_total,formatted_address,"
-                    "geometry,opening_hours,business_status,types"
-                ),
-                "key": api_key,
-            }
-            async with session.get(PLACE_DETAILS_URL, params=detail_params) as dresp:
-                ddata = await dresp.json()
+            seen_place_ids.add(pid)
+            all_places.append((priority, place))
+            new_count += 1
 
-            detail = ddata.get("result") or {}
-            phone = detail.get("international_phone_number") or detail.get("formatted_phone_number")
-            geo = detail.get("geometry", {}).get("location", {})
-            hours = detail.get("opening_hours", {})
+        log_tool_call(
+            ticket_id, "google_maps_text_search",
+            {"query": search_text, "strategy_priority": priority},
+            {"total_found": len(results), "new_unique": new_count},
+            latency_ms=int((time.time() - start) * 1000),
+        )
 
-            store_lat = geo.get("lat")
-            store_lng = geo.get("lng")
-            distance_km: float | None = None
-            if user_lat and user_lng and store_lat and store_lng:
-                distance_km = round(_haversine_km(user_lat, user_lng, store_lat, store_lng), 2)
+    all_places.sort(key=lambda x: (
+        x[0],
+        -(x[1].get("rating") or 0),
+        -(x[1].get("user_ratings_total") or 0),
+    ))
+    top = all_places[:max_stores * 2]
 
-            store = {
-                "name": detail.get("name") or place.get("name", "Unknown"),
-                "address": detail.get("formatted_address") or place.get("formatted_address"),
-                "phone_number": phone,
-                "rating": detail.get("rating") or place.get("rating"),
-                "total_ratings": detail.get("user_ratings_total") or place.get("user_ratings_total"),
-                "place_id": place_id,
-                "latitude": store_lat,
-                "longitude": store_lng,
-                "is_open_now": hours.get("open_now"),
-                "business_status": detail.get("business_status"),
-                "place_types": detail.get("types", []),
-                "distance_km": distance_km,
-            }
-            stores.append(store)
+    stores: list[dict[str, Any]] = []
+    for _priority, place in top:
+        place_id = place.get("place_id")
+        if not place_id:
+            continue
+        detail_start = time.time()
+        detail_params = {
+            "place_id": place_id,
+            "fields": (
+                "formatted_phone_number,international_phone_number,"
+                "name,rating,user_ratings_total,formatted_address,"
+                "geometry,opening_hours,business_status,types"
+            ),
+            "key": api_key,
+        }
+        async with session.get(PLACE_DETAILS_URL, params=detail_params) as dresp:
+            ddata = await dresp.json()
 
-            log_tool_call(
-                ticket_id, "google_maps_place_details",
-                {"place_id": place_id},
-                {"name": store["name"], "phone": phone, "open_now": store["is_open_now"],
-                 "distance_km": distance_km},
-                latency_ms=int((time.time() - detail_start) * 1000),
-            )
+        detail = ddata.get("result") or {}
+        phone = detail.get("international_phone_number") or detail.get("formatted_phone_number")
+        geo = detail.get("geometry", {}).get("location", {})
+        hours = detail.get("opening_hours", {})
 
-            if len([s for s in stores if s.get("phone_number")]) >= max_stores:
-                break
+        store_lat = geo.get("lat")
+        store_lng = geo.get("lng")
+        distance_km: float | None = None
+        if user_lat and user_lng and store_lat and store_lng:
+            distance_km = round(_haversine_km(user_lat, user_lng, store_lat, store_lng), 2)
+
+        store = {
+            "name": detail.get("name") or place.get("name", "Unknown"),
+            "address": detail.get("formatted_address") or place.get("formatted_address"),
+            "phone_number": phone,
+            "rating": detail.get("rating") or place.get("rating"),
+            "total_ratings": detail.get("user_ratings_total") or place.get("user_ratings_total"),
+            "place_id": place_id,
+            "latitude": store_lat,
+            "longitude": store_lng,
+            "is_open_now": hours.get("open_now"),
+            "business_status": detail.get("business_status"),
+            "place_types": detail.get("types", []),
+            "distance_km": distance_km,
+        }
+        stores.append(store)
+
+        log_tool_call(
+            ticket_id, "google_maps_place_details",
+            {"place_id": place_id},
+            {"name": store["name"], "phone": phone, "open_now": store["is_open_now"],
+             "distance_km": distance_km},
+            latency_ms=int((time.time() - detail_start) * 1000),
+        )
+
+        if len([s for s in stores if s.get("phone_number")]) >= max_stores:
+            break
 
     callable_stores = [
         s for s in stores

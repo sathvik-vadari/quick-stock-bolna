@@ -4,7 +4,9 @@ import time
 import logging
 from typing import Any
 
+import httpx
 from openai import AsyncAzureOpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.helpers.config import Config
 from app.helpers.prompt_loader import PromptLoader
@@ -32,6 +34,7 @@ def _get_client() -> AsyncAzureOpenAI:
             api_key=Config.AZURE_OPENAI_API_KEY,
             azure_endpoint=Config.AZURE_OPENAI_ENDPOINT,
             api_version=Config.AZURE_OPENAI_API_VERSION,
+            timeout=httpx.Timeout(90.0, connect=10.0),
         )
     return _client
 
@@ -71,14 +74,7 @@ async def analyze_transcript(
     start = time.time()
     client = _get_client()
 
-    resp = await client.chat.completions.create(
-        model=Config.AZURE_OPENAI_DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        response_format={"type": "json_object"},
-    )
+    resp = await _call_openai(client, system_prompt, user_message)
     raw = resp.choices[0].message.content or "{}"
     latency = int((time.time() - start) * 1000)
     analysis = json.loads(raw)
@@ -215,4 +211,21 @@ async def _compile_final_result(ticket_id: str) -> None:
     logger.info(
         "Ticket %s completed — best: %s (₹%s)",
         ticket_id, best.get("store_name"), best.get("price"),
+    )
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    retry=retry_if_exception_type((TimeoutError, httpx.TimeoutException, httpx.ConnectError)),
+    reraise=True,
+)
+async def _call_openai(client: AsyncAzureOpenAI, system_prompt: str, user_message: str):
+    return await client.chat.completions.create(
+        model=Config.AZURE_OPENAI_DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        response_format={"type": "json_object"},
     )

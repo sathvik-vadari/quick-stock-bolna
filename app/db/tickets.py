@@ -415,6 +415,33 @@ def get_store_calls_for_ticket(ticket_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def get_store_call_retry_info(call_id: int) -> Optional[dict[str, Any]]:
+    """Get the info needed to retry a store call."""
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "SELECT sc.id, sc.ticket_id, sc.store_id, sc.retry_count, "
+                "ts.store_name, ts.phone_number, ts.address, ts.rating "
+                "FROM store_calls sc "
+                "JOIN ticket_stores ts ON ts.id = sc.store_id "
+                "WHERE sc.id = %s",
+                (call_id,),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def set_store_call_retry_scheduled(call_id: int) -> None:
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE store_calls SET status = 'retry_scheduled', "
+                "retry_count = COALESCE(retry_count, 0) + 1, "
+                "bolna_call_id = NULL, updated_at = NOW() WHERE id = %s",
+                (call_id,),
+            )
+
+
 def count_pending_calls(ticket_id: str) -> int:
     with get_connection() as conn:
         with get_cursor(conn) as cur:

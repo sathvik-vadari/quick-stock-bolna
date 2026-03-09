@@ -263,6 +263,13 @@ async def _process_ticket(
         if query_analysis and query_analysis.get("is_specific_store"):
             specific_store_name = query_analysis.get("specific_store_name")
 
+        preferred_retailers = product.get("preferred_retailers") or []
+        if preferred_retailers:
+            logger.info(
+                "Ticket %s: price_tier=%s, preferred_retailers=%s",
+                ticket_id, product.get("price_tier", "mid"), preferred_retailers,
+            )
+
         stores = await find_stores(
             ticket_id,
             product.get("store_search_query", "store"),
@@ -270,13 +277,14 @@ async def _process_ticket(
             max_stores=max_stores,
             search_queries=search_queries,
             specific_store_name=specific_store_name,
+            preferred_retailers=preferred_retailers,
         )
         logger.info("Ticket %s: found %d callable stores", ticket_id, len(stores))
 
-        # Step 5: Gemini re-ranking
+        # Step 5: Gemini re-ranking (price-tier-aware)
         if query_analysis and stores and len(stores) > 1:
             try:
-                reranked = await rerank_stores(ticket_id, query, stores, query_analysis)
+                reranked = await rerank_stores(ticket_id, query, stores, query_analysis, product=product)
                 ordered_place_ids = [s.get("place_id") for s in reranked if s.get("place_id")]
                 if ordered_place_ids:
                     from app.db.tickets import update_store_priorities

@@ -25,6 +25,30 @@ RULES FOR GENERIC PRODUCTS:
 - Prices should be realistic averages in INR.
 - The store_search_query should be a concise Google Maps category (e.g. "pharmacy", "electronics store", "grocery store").
 
+STORE QUALITY — PRICE TIER AND PREFERRED RETAILERS:
+You MUST classify the product into a price_tier and suggest preferred_retailers.
+
+price_tier determines how much store reputation matters:
+- "premium" (₹5000+): iPhones, laptops, TVs, ACs, branded watches, designer clothing, etc.
+  → People buy these from trusted, established retailers. Prefer chains and authorized dealers.
+- "mid" (₹500–₹5000): headphones, small appliances, branded shoes, good cosmetics, etc.
+  → Mix of branded stores and good local shops works.
+- "budget" (under ₹500): medicines, groceries, stationery, basic household items, street food, etc.
+  → Any local store is fine. Proximity matters more than brand.
+
+preferred_retailers: List 3-6 well-known Indian retail chains/authorized dealers for this product.
+These are stores where a typical Indian consumer would TRUST buying this product.
+Examples by category:
+- Smartphones/electronics: ["Croma", "Reliance Digital", "Aptronix", "Samsung SmartCafé", "Vijay Sales", "iWorld"]
+- Medicines/pharmacy: ["Apollo Pharmacy", "MedPlus", "NetMeds Pharmacy"]
+- Groceries: ["DMart", "Reliance Fresh", "More Supermarket", "BigBazaar", "Star Bazaar"]
+- Clothing/fashion: ["Shoppers Stop", "Lifestyle", "Westside", "Pantaloons"]
+- Furniture/home: ["IKEA", "Pepperfry Studio", "HomeTown", "Urban Ladder"]
+- Restaurants/cafés: [] (not applicable — use specific store search)
+- For specific stores (is_specific_store=true): leave preferred_retailers as []
+
+IMPORTANT: These are SUGGESTIONS to help the search — if the user's area has other good stores, those will also show up. The point is to BOOST well-known chains in the search, not to exclude small shops entirely.
+
 Respond with ONLY a JSON object (no markdown, no extra text):
 {
     "product_name": "what the user wants (item name or store's offering)",
@@ -33,6 +57,8 @@ Respond with ONLY a JSON object (no markdown, no extra text):
     "specific_store_name": "store name if query is about a specific store, else null",
     "specs": {"key": "value"},
     "avg_price_online": 999.99,
+    "price_tier": "premium | mid | budget",
+    "preferred_retailers": ["Store Chain 1", "Store Chain 2", "Store Chain 3"],
     "alternatives": [
         {
             "name": "alternative product or similar store",

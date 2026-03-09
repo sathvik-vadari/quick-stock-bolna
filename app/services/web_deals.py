@@ -12,6 +12,7 @@ from typing import Any
 
 from google import genai
 from google.genai import types
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.helpers.config import Config
 from app.db.tickets import log_llm_call, save_web_deals
@@ -27,7 +28,10 @@ def _get_client():
     if _client is None:
         if not Config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set")
-        _client = genai.Client(api_key=Config.GEMINI_API_KEY)
+        _client = genai.Client(
+            api_key=Config.GEMINI_API_KEY,
+            http_options={"timeout": 90_000},
+        )
     return _client
 
 
@@ -243,10 +247,10 @@ async def _grounded_search(
     )
 
     try:
-        response = await client.aio.models.generate_content(
-            model=Config.GEMINI_MODEL,
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
+        response = await _call_gemini(
+            client,
+            full_prompt,
+            types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
                 temperature=1.0,
             ),
@@ -306,10 +310,10 @@ async def _synthesize_results(
 
     client = _get_client()
     try:
-        response = await client.aio.models.generate_content(
-            model=Config.GEMINI_MODEL,
-            contents=synthesis_prompt,
-            config=types.GenerateContentConfig(
+        response = await _call_gemini(
+            client,
+            synthesis_prompt,
+            types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.1,
             ),
@@ -343,6 +347,20 @@ def _parse_json(raw: str) -> dict[str, Any]:
             "search_summary": text[:500],
             "parse_error": True,
         }
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    retry=retry_if_exception_type((TimeoutError, ConnectionError, OSError)),
+    reraise=True,
+)
+async def _call_gemini(client, contents: str, config: types.GenerateContentConfig):
+    return await client.aio.models.generate_content(
+        model=Config.GEMINI_MODEL,
+        contents=contents,
+        config=config,
+    )
 
 
 def _extract_grounding_metadata(response) -> dict[str, Any] | None:

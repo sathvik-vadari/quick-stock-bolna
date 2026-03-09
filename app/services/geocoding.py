@@ -6,6 +6,7 @@ from typing import Any, Optional
 import aiohttp
 
 from app.helpers.config import Config
+from app.helpers.http_session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,9 @@ async def geocode_address(address: str) -> Optional[dict[str, Any]]:
 
     params = {"address": address, "key": Config.GOOGLE_MAPS_API_KEY, "region": "in"}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(GEOCODE_URL, params=params) as resp:
-                data = await resp.json()
+        session = await get_session()
+        async with session.get(GEOCODE_URL, params=params) as resp:
+            data = await resp.json()
     except Exception:
         logger.exception("Geocoding request failed for %r", address)
         return None

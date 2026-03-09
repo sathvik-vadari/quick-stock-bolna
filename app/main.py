@@ -1,4 +1,5 @@
 """QuickStock — AI Voice Store Availability Checker."""
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ import uvicorn
 
 from app.helpers.config import Config
 from app.helpers.logger import setup_logger
+from app.helpers.http_session import close_session
 from app.db.connection import init_db
 from app.routes import ticket_routes, bolna_webhook
 
@@ -18,6 +20,7 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("QuickStock backend started")
     yield
+    await close_session()
     logger.info("QuickStock backend shutting down")
 
 
@@ -61,12 +64,14 @@ async def health():
 
 
 def main():
-    logger.info("Starting QuickStock")
+    is_dev = os.getenv("ENV", "production").lower() in ("dev", "development")
+    logger.info("Starting QuickStock (dev=%s)", is_dev)
     uvicorn.run(
         "app.main:app",
         host=Config.SERVER_HOST,
         port=Config.SERVER_PORT,
-        reload=True,
+        reload=is_dev,
+        workers=1 if is_dev else 2,
         log_level=Config.LOG_LEVEL.lower(),
     )
 

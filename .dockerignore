@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.git/
+frontend/
+logs/
+data/
+*.egg-info/
+dist/
+.DS_Store
+test_pipeline.py
+README.md
+CLAUDE.md
+.cursor/

@@ -6,6 +6,7 @@ from typing import Any
 
 from google import genai
 from google.genai import types
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.helpers.config import Config
 from app.db.tickets import log_llm_call
@@ -21,7 +22,10 @@ def _get_client():
     if _client is None:
         if not Config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set")
-        _client = genai.Client(api_key=Config.GEMINI_API_KEY)
+        _client = genai.Client(
+            api_key=Config.GEMINI_API_KEY,
+            http_options={"timeout": 90_000},
+        )
     return _client
 
 
@@ -39,13 +43,10 @@ async def analyze_query(ticket_id: str, query: str, location: str) -> dict[str, 
     start = time.time()
     client = _get_client()
 
-    response = await client.aio.models.generate_content(
-        model=Config.GEMINI_MODEL,
-        contents=f"{system_prompt}\n\n{user_message}",
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.1,
-        ),
+    response = await _call_gemini(
+        client,
+        f"{system_prompt}\n\n{user_message}",
+        types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
     )
 
     raw = response.text or "{}"
@@ -70,11 +71,16 @@ async def analyze_query(ticket_id: str, query: str, location: str) -> dict[str, 
 
 
 async def rerank_stores(
-    ticket_id: str, query: str, stores: list[dict], query_analysis: dict,
+    ticket_id: str,
+    query: str,
+    stores: list[dict],
+    query_analysis: dict,
+    product: dict | None = None,
 ) -> list[dict]:
     """
     Use Gemini to re-rank store results based on relevance to the query.
-    Prioritizes exact store name matches, then category relevance.
+    Considers store reputation and price tier — premium products get
+    ranked toward trusted chains, budget items toward nearest stores.
     """
     if not stores or len(stores) <= 1:
         return stores
@@ -97,20 +103,53 @@ async def rerank_stores(
     product_cat = query_analysis.get("product_category") or ""
     is_specific = query_analysis.get("is_specific_store", False)
 
+    price_tier = (product or {}).get("price_tier", "mid")
+    preferred_retailers = (product or {}).get("preferred_retailers") or []
+
     if is_specific:
         ranking_criteria = (
             "Highest priority: exact or close name match to the requested store. "
             "Among matching stores, prefer the NEAREST one (lowest distance_km). "
             "Non-matching stores go last, ranked by category relevance then rating."
         )
+    elif price_tier == "premium":
+        retailers_str = ", ".join(preferred_retailers) if preferred_retailers else "well-known chains"
+        ranking_criteria = (
+            f"This is a PREMIUM product (₹5000+). Store reputation matters a lot.\n"
+            f"Preferred retailers: {retailers_str}\n"
+            f"Ranking priority:\n"
+            f"1. Well-known retail chains and authorized dealers (look for names matching or similar to preferred retailers)\n"
+            f"2. Stores with high total_ratings (1000+ ratings usually means established chain)\n"
+            f"3. Rating quality (4.0+)\n"
+            f"4. Proximity (lower distance_km)\n"
+            f"Small/unknown shops should be ranked LAST even if they are closer. "
+            f"Customers trust big brands for expensive purchases."
+        )
+    elif price_tier == "mid":
+        retailers_str = ", ".join(preferred_retailers) if preferred_retailers else "known stores"
+        ranking_criteria = (
+            f"This is a MID-RANGE product. Balance store reputation with convenience.\n"
+            f"Preferred retailers (slight boost): {retailers_str}\n"
+            f"Ranking priority:\n"
+            f"1. Category relevance to the product\n"
+            f"2. Known chains get a moderate boost over unknown shops\n"
+            f"3. Rating and total_ratings\n"
+            f"4. Proximity (lower distance_km)"
+        )
     else:
         ranking_criteria = (
-            "Rank by: category relevance, then rating, then proximity (lower distance_km is better)."
+            "This is a BUDGET/everyday product. Convenience matters most.\n"
+            "Ranking priority:\n"
+            "1. Category relevance\n"
+            "2. Proximity (nearest first — lower distance_km is better)\n"
+            "3. Rating\n"
+            "Any local store is fine for this kind of purchase."
         )
 
     prompt = f"""User query: "{query}"
 Specific store requested: "{specific_store}"
 Product category: "{product_cat}"
+Price tier: "{price_tier}"
 
 Stores found:
 {stores_summary}
@@ -122,13 +161,10 @@ Respond JSON only:
 
     try:
         start = time.time()
-        response = await client.aio.models.generate_content(
-            model=Config.GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0,
-            ),
+        response = await _call_gemini(
+            client,
+            prompt,
+            types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
         )
         raw = response.text or "{}"
         result = json.loads(raw)
@@ -160,3 +196,17 @@ Respond JSON only:
     except Exception:
         logger.exception("Gemini store re-ranking failed, using original order")
         return stores
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    retry=retry_if_exception_type((TimeoutError, ConnectionError, OSError)),
+    reraise=True,
+)
+async def _call_gemini(client, contents: str, config: types.GenerateContentConfig):
+    return await client.aio.models.generate_content(
+        model=Config.GEMINI_MODEL,
+        contents=contents,
+        config=config,
+    )
