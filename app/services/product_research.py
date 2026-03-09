@@ -50,7 +50,6 @@ async def research_product(
 
     resp = await client.chat.completions.create(
         model=Config.AZURE_OPENAI_DEPLOYMENT,
-        temperature=0.2,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},

@@ -51,6 +51,10 @@ export interface StoreCall {
 export interface TicketStatus {
   ticket_id: string;
   status: string;
+  query?: string;
+  location?: string;
+  user_phone?: string;
+  user_name?: string;
   created_at?: string;
   updated_at?: string;
   error?: string;
@@ -112,11 +116,46 @@ export interface OptionsResponse {
   options: OptionItem[];
   web_deals?: WebDeal[];
   web_deals_summary?: string;
-  web_deals_best?: { platform: string; price?: number };
+  web_deals_best?: { platform: string; price?: number; reason?: string };
   message: string;
   quick_verdict?: string;
   error?: string;
   status?: string;
+}
+
+// ── Dashboard / listing types ─────────────────────────────────────────────
+
+export interface TicketListItem {
+  id: number;
+  ticket_id: string;
+  query: string;
+  location: string;
+  status: string;
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
+  product_name?: string;
+  total_calls: number;
+  available_count: number;
+}
+
+export interface DashboardStats {
+  total_tickets: number;
+  status_counts: Record<string, number>;
+  total_calls: number;
+  call_outcomes: {
+    available: number;
+    unavailable: number;
+    failed: number;
+    in_progress: number;
+  };
+  stores_contacted: number;
+  daily_activity: { day: string; count: number }[];
+  completed: number;
+  failed: number;
+  in_progress: number;
+  products_found: number;
+  success_rate: number;
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────
@@ -131,4 +170,39 @@ export function getTicketStatus(ticketId: string): Promise<TicketStatus> {
 
 export function getTicketOptions(ticketId: string): Promise<OptionsResponse> {
   return request(`/api/ticket/${ticketId}/options`);
+}
+
+export function subscribeToTicket(
+  ticketId: string,
+  onUpdate: (status: TicketStatus) => void,
+  onError?: () => void
+): () => void {
+  const url = `${API_BASE}/api/ticket/${ticketId}/events`;
+  const es = new EventSource(url);
+
+  es.onmessage = (event) => {
+    try {
+      onUpdate(JSON.parse(event.data) as TicketStatus);
+    } catch {
+      // malformed event
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    onError?.();
+  };
+
+  return () => es.close();
+}
+
+export function listTickets(
+  limit = 50,
+  offset = 0
+): Promise<{ tickets: TicketListItem[]; count: number }> {
+  return request(`/api/tickets?limit=${limit}&offset=${offset}`);
+}
+
+export function getDashboardStats(): Promise<DashboardStats> {
+  return request("/api/dashboard");
 }

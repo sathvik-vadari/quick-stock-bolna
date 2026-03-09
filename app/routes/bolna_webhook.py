@@ -37,11 +37,11 @@ async def bolna_webhook(request: Request) -> Response:
         logger.warning("Bolna webhook invalid JSON: %s", e)
         return Response(status_code=400, content=b"Invalid JSON")
 
-    call_id = body.get("call_id") or body.get("conversation_id") or body.get("id")
+    call_id = body.get("call_id") or body.get("execution_id") or body.get("conversation_id") or body.get("id")
     call_status = body.get("call_status") or body.get("status") or ""
     transcript = (body.get("transcript") or "").strip()
     messages = body.get("messages") or []
-    user_data = body.get("user_data") or {}
+    user_data = body.get("user_data") or body.get("context_details") or {}
 
     # Routing: ticket_id and store_call_id are embedded in user_data
     ticket_id = user_data.get("ticket_id")
@@ -53,7 +53,8 @@ async def bolna_webhook(request: Request) -> Response:
     )
 
     terminal_statuses = {"completed", "busy", "failed", "no-answer", "no_answer",
-                         "canceled", "cancelled", "error"}
+                         "canceled", "cancelled", "error", "call-disconnected",
+                         "balance-low"}
 
     if call_status.lower() not in terminal_statuses:
         # Non-terminal event (e.g. ringing, in-progress) — acknowledge and ignore
@@ -83,13 +84,18 @@ async def _handle_call_transcript(
 ) -> None:
     """Background task: save transcript and run transcript analyzer LLM."""
     try:
-        call_id_db = save_store_call_transcript(bolna_call_id, transcript, messages or [])
-        if not call_id_db:
+        sc = get_store_call_by_bolna_id(bolna_call_id)
+        if not sc:
             logger.warning("No store_call found for bolna_call_id=%s", bolna_call_id)
             return
 
-        sc = get_store_call_by_bolna_id(bolna_call_id)
-        if not sc:
+        if sc["status"] in ("analyzed", "failed"):
+            logger.info("Store call %s already %s, skipping duplicate webhook", sc["id"], sc["status"])
+            return
+
+        call_id_db = save_store_call_transcript(bolna_call_id, transcript, messages or [])
+        if not call_id_db:
+            logger.warning("Failed to save transcript for bolna_call_id=%s", bolna_call_id)
             return
 
         await analyze_transcript(
@@ -130,6 +136,10 @@ async def _handle_no_transcript(
             logger.warning(
                 "No store_call found for bolna_call_id=%s (no transcript)", bolna_call_id
             )
+            return
+
+        if sc["status"] in ("analyzed", "failed"):
+            logger.info("Store call %s already %s, skipping duplicate webhook", sc["id"], sc["status"])
             return
 
         note = _FAILURE_NOTES.get(ended_reason.lower(), f"Call ended: {ended_reason}")

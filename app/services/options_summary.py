@@ -14,6 +14,8 @@ from app.db.tickets import (
     get_product,
     get_store_calls_for_ticket,
     get_web_deals,
+    get_options_summary_cache,
+    save_options_summary_cache,
     log_llm_call,
 )
 
@@ -106,7 +108,7 @@ def _build_options(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def generate_options_summary(ticket_id: str) -> dict[str, Any]:
     """
     Build the full options payload for a completed ticket.
-    Returns structured options + an LLM-generated user-facing message.
+    Returns cached result if available, otherwise generates + caches.
     """
     ticket = get_ticket(ticket_id)
     if not ticket:
@@ -119,6 +121,21 @@ async def generate_options_summary(ticket_id: str) -> dict[str, Any]:
             "ticket_id": ticket_id,
         }
 
+    cached = get_options_summary_cache(ticket_id)
+    if cached:
+        logger.info("Returning cached options summary for %s", ticket_id)
+        return cached
+
+    result = await _build_fresh_summary(ticket_id, ticket)
+
+    if "error" not in result:
+        save_options_summary_cache(ticket_id, result)
+
+    return result
+
+
+async def _build_fresh_summary(ticket_id: str, ticket: dict[str, Any]) -> dict[str, Any]:
+    """Generate the full options payload from scratch (DB + LLM)."""
     product = get_product(ticket_id)
     all_calls = get_store_calls_for_ticket(ticket_id)
     options = _build_options(all_calls)
@@ -280,7 +297,6 @@ async def _generate_message(
 
     resp = await client.chat.completions.create(
         model=Config.AZURE_OPENAI_DEPLOYMENT,
-        temperature=0.7,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

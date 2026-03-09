@@ -30,7 +30,8 @@ def _build_user_data(
 ) -> dict[str, Any]:
     """
     Build the user_data dict to pass to Bolna.
-    These values are injected into the agent's system prompt via {{user_data.field}} template vars.
+    These values are injected into the agent's system prompt via {field} template vars.
+    Keys here must match the {variable_name} placeholders in the Bolna agent prompt.
     """
     specs = product.get("specs") or {}
     specs_lines = [f"{k}: {v}" for k, v in specs.items()]

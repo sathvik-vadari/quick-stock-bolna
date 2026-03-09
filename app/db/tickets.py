@@ -4,6 +4,7 @@ import logging
 from typing import Any, Optional
 
 from app.db.connection import get_connection, get_cursor
+from app.helpers.events import TicketEvents
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def update_ticket_status(ticket_id: str, status: str, *, error_message: Optional
                 "WHERE ticket_id = %s",
                 (status, error_message, ticket_id),
             )
+    TicketEvents.notify(ticket_id)
 
 
 def update_ticket_query_type(ticket_id: str, query_type: str) -> None:
@@ -89,6 +91,7 @@ def set_ticket_final_result(ticket_id: str, result: dict) -> None:
                 "updated_at = NOW() WHERE ticket_id = %s",
                 (json.dumps(result, default=str), ticket_id),
             )
+    TicketEvents.notify(ticket_id)
 
 
 def get_ticket(ticket_id: str) -> Optional[dict[str, Any]]:
@@ -260,7 +263,7 @@ def create_store_call(ticket_id: str, store_id: int) -> int:
             return cur.fetchone()["id"]
 
 
-def update_store_call_bolna_id(call_id: int, bolna_call_id: str) -> None:
+def update_store_call_bolna_id(call_id: int, bolna_call_id: str, ticket_id: Optional[str] = None) -> None:
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute(
@@ -268,15 +271,27 @@ def update_store_call_bolna_id(call_id: int, bolna_call_id: str) -> None:
                 "updated_at = NOW() WHERE id = %s",
                 (bolna_call_id, call_id),
             )
+            if not ticket_id:
+                cur.execute("SELECT ticket_id FROM store_calls WHERE id = %s", (call_id,))
+                row = cur.fetchone()
+                ticket_id = row["ticket_id"] if row else None
+    if ticket_id:
+        TicketEvents.notify(ticket_id)
 
 
-def update_store_call_status(call_id: int, status: str) -> None:
+def update_store_call_status(call_id: int, status: str, ticket_id: Optional[str] = None) -> None:
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute(
                 "UPDATE store_calls SET status = %s, updated_at = NOW() WHERE id = %s",
                 (status, call_id),
             )
+            if not ticket_id:
+                cur.execute("SELECT ticket_id FROM store_calls WHERE id = %s", (call_id,))
+                row = cur.fetchone()
+                ticket_id = row["ticket_id"] if row else None
+    if ticket_id:
+        TicketEvents.notify(ticket_id)
 
 
 def get_store_call_by_bolna_id(bolna_call_id: str) -> Optional[dict[str, Any]]:
@@ -312,10 +327,14 @@ def save_store_call_transcript(
                 ),
             )
             cur.execute(
-                "SELECT id FROM store_calls WHERE bolna_call_id = %s", (bolna_call_id,)
+                "SELECT id, ticket_id FROM store_calls WHERE bolna_call_id = %s",
+                (bolna_call_id,),
             )
             row = cur.fetchone()
-    return row["id"] if row else None
+    if row:
+        TicketEvents.notify(row["ticket_id"])
+        return row["id"]
+    return None
 
 
 def save_store_call_analysis(call_id: int, analysis: dict[str, Any]) -> None:
@@ -326,6 +345,7 @@ def save_store_call_analysis(call_id: int, analysis: dict[str, Any]) -> None:
         notes_parts.append(analysis["notes"])
     combined_notes = " | ".join(notes_parts) if notes_parts else None
 
+    ticket_id = None
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute(
@@ -352,6 +372,12 @@ def save_store_call_analysis(call_id: int, analysis: dict[str, Any]) -> None:
                     call_id,
                 ),
             )
+            cur.execute("SELECT ticket_id FROM store_calls WHERE id = %s", (call_id,))
+            row = cur.fetchone()
+            if row:
+                ticket_id = row["ticket_id"]
+    if ticket_id:
+        TicketEvents.notify(ticket_id)
 
 
 def get_store_calls_for_ticket(ticket_id: str) -> list[dict[str, Any]]:
@@ -456,6 +482,118 @@ def get_web_deals(ticket_id: str) -> Optional[dict[str, Any]]:
     except (json.JSONDecodeError, TypeError):
         r["best_deal"] = None
     return r
+
+
+# ---------------------------------------------------------------------------
+# Options summary cache
+# ---------------------------------------------------------------------------
+
+def get_options_summary_cache(ticket_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "SELECT options_summary_cache FROM tickets WHERE ticket_id = %s",
+                (ticket_id,),
+            )
+            row = cur.fetchone()
+    if not row or not row.get("options_summary_cache"):
+        return None
+    try:
+        return json.loads(row["options_summary_cache"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def save_options_summary_cache(ticket_id: str, summary: dict[str, Any]) -> None:
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE tickets SET options_summary_cache = %s WHERE ticket_id = %s",
+                (json.dumps(summary, default=str), ticket_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard / listing
+# ---------------------------------------------------------------------------
+
+def list_tickets(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "SELECT t.id, t.ticket_id, t.query, t.location, t.status, "
+                "t.error_message, t.created_at, t.updated_at, "
+                "tp.product_name, "
+                "(SELECT COUNT(*) FROM store_calls sc WHERE sc.ticket_id = t.ticket_id) AS total_calls, "
+                "(SELECT COUNT(*) FROM store_calls sc WHERE sc.ticket_id = t.ticket_id "
+                " AND sc.product_available = true) AS available_count "
+                "FROM tickets t "
+                "LEFT JOIN ticket_products tp ON tp.ticket_id = t.ticket_id "
+                "ORDER BY t.created_at DESC "
+                "LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+    result = []
+    for r in rows:
+        row = dict(r)
+        row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
+        row["updated_at"] = str(row["updated_at"]) if row.get("updated_at") else None
+        result.append(row)
+    return result
+
+
+def get_dashboard_stats() -> dict[str, Any]:
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM tickets")
+            total = cur.fetchone()["total"]
+
+            cur.execute("SELECT status, COUNT(*) AS cnt FROM tickets GROUP BY status")
+            status_counts = {r["status"]: r["cnt"] for r in cur.fetchall()}
+
+            cur.execute("SELECT COUNT(*) AS total FROM store_calls")
+            total_calls = cur.fetchone()["total"]
+
+            cur.execute(
+                "SELECT "
+                "COUNT(*) FILTER (WHERE product_available = true) AS available, "
+                "COUNT(*) FILTER (WHERE product_available = false) AS unavailable, "
+                "COUNT(*) FILTER (WHERE status = 'failed') AS failed, "
+                "COUNT(*) FILTER (WHERE status IN ('calling','pending','transcript_received')) AS in_progress "
+                "FROM store_calls"
+            )
+            outcomes = dict(cur.fetchone())
+
+            cur.execute("SELECT COUNT(DISTINCT store_id) AS total FROM store_calls")
+            stores_contacted = cur.fetchone()["total"]
+
+            cur.execute(
+                "SELECT DATE(created_at) AS day, COUNT(*) AS count "
+                "FROM tickets "
+                "WHERE created_at >= NOW() - INTERVAL '14 days' "
+                "GROUP BY DATE(created_at) ORDER BY day"
+            )
+            daily = [{"day": str(r["day"]), "count": r["count"]} for r in cur.fetchall()]
+
+    completed = status_counts.get("completed", 0)
+    active_statuses = ("received", "analyzing", "researching", "finding_stores", "calling_stores")
+    in_progress = sum(status_counts.get(s, 0) for s in active_statuses)
+    denom = max(outcomes["available"] + outcomes["unavailable"], 1)
+
+    return {
+        "total_tickets": total,
+        "status_counts": status_counts,
+        "total_calls": total_calls,
+        "call_outcomes": outcomes,
+        "stores_contacted": stores_contacted,
+        "daily_activity": daily,
+        "completed": completed,
+        "failed": status_counts.get("failed", 0),
+        "in_progress": in_progress,
+        "products_found": outcomes["available"],
+        "success_rate": round((outcomes["available"] / denom) * 100),
+    }
 
 
 # ---------------------------------------------------------------------------

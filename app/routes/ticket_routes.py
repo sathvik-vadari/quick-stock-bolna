@@ -1,8 +1,10 @@
 """Ticket API — the main entry point for the frontend."""
 import asyncio
+import json as _json
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.helpers.config import Config
@@ -18,6 +20,8 @@ from app.db.tickets import (
     get_product,
     get_stores,
     get_web_deals,
+    list_tickets as db_list_tickets,
+    get_dashboard_stats as db_get_dashboard_stats,
 )
 from app.services.product_research import research_product
 from app.services.google_maps import find_stores
@@ -83,11 +87,10 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
 
 
 # ---------------------------------------------------------------------------
-# GET /api/ticket/{ticket_id}
+# Shared: build a full ticket status dict (used by REST + SSE)
 # ---------------------------------------------------------------------------
 
-@router.get("/api/ticket/{ticket_id}")
-async def get_ticket_status(ticket_id: str):
+def _build_ticket_response(ticket_id: str) -> dict:
     ticket = get_ticket(ticket_id)
     if not ticket:
         return {"error": "Ticket not found", "ticket_id": ticket_id}
@@ -95,6 +98,10 @@ async def get_ticket_status(ticket_id: str):
     response: dict = {
         "ticket_id": ticket["ticket_id"],
         "status": ticket["status"],
+        "query": ticket.get("query"),
+        "location": ticket.get("location"),
+        "user_phone": ticket.get("user_phone"),
+        "user_name": ticket.get("user_name"),
         "created_at": ticket.get("created_at"),
         "updated_at": ticket.get("updated_at"),
     }
@@ -137,6 +144,52 @@ async def get_ticket_status(ticket_id: str):
 
 
 # ---------------------------------------------------------------------------
+# GET /api/ticket/{ticket_id}
+# ---------------------------------------------------------------------------
+
+@router.get("/api/ticket/{ticket_id}")
+async def get_ticket_status(ticket_id: str):
+    return _build_ticket_response(ticket_id)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/ticket/{ticket_id}/events  (SSE stream)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/ticket/{ticket_id}/events")
+async def ticket_events_stream(ticket_id: str):
+    from app.helpers.events import TicketEvents
+
+    async def generate():
+        event = TicketEvents.subscribe(ticket_id)
+        try:
+            data = _build_ticket_response(ticket_id)
+            yield f"data: {_json.dumps(data, default=str)}\n\n"
+
+            while True:
+                event.clear()
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                data = _build_ticket_response(ticket_id)
+                yield f"data: {_json.dumps(data, default=str)}\n\n"
+
+                if data.get("status") in ("completed", "failed"):
+                    break
+        finally:
+            TicketEvents.unsubscribe(ticket_id, event)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /api/ticket/{ticket_id}/options
 # ---------------------------------------------------------------------------
 
@@ -148,6 +201,25 @@ async def get_ticket_options(ticket_id: str):
         status_code = 404 if result["error"] == "Ticket not found" else 400
         return JSONResponse(status_code=status_code, content=result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tickets — list all tickets
+# ---------------------------------------------------------------------------
+
+@router.get("/api/tickets")
+async def list_tickets_endpoint(limit: int = 50, offset: int = 0):
+    tickets = db_list_tickets(limit=min(limit, 100), offset=max(offset, 0))
+    return {"tickets": tickets, "count": len(tickets)}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/dashboard — aggregated stats
+# ---------------------------------------------------------------------------
+
+@router.get("/api/dashboard")
+async def dashboard_stats():
+    return db_get_dashboard_stats()
 
 
 # ---------------------------------------------------------------------------

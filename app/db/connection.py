@@ -140,6 +140,12 @@ def init_db() -> None:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
 
+                -- Add options cache column if missing (idempotent)
+                DO $$ BEGIN
+                    ALTER TABLE tickets ADD COLUMN options_summary_cache TEXT;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+
                 CREATE TABLE IF NOT EXISTS llm_logs (
                     id SERIAL PRIMARY KEY,
                     ticket_id TEXT NOT NULL,

@@ -73,7 +73,6 @@ async def analyze_transcript(
 
     resp = await client.chat.completions.create(
         model=Config.AZURE_OPENAI_DEPLOYMENT,
-        temperature=0.0,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

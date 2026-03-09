@@ -37,7 +37,7 @@ class Config:
 
     # Google Gemini
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
     # Bolna (voice AI — outbound calls)
     BOLNA_API_KEY: Optional[str] = os.getenv("BOLNA_API_KEY")

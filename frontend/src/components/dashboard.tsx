@@ -1,0 +1,459 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  listTickets,
+  getDashboardStats,
+  type TicketListItem,
+  type DashboardStats,
+} from "@/lib/api";
+import {
+  Phone,
+  MapPin,
+  Plus,
+  TrendingUp,
+  Package,
+  PhoneCall,
+  ArrowRight,
+  Search,
+  Zap,
+  BarChart3,
+  RefreshCw,
+} from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  received: { label: "Received", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+  analyzing: { label: "Analyzing", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+  researching: { label: "Researching", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/20" },
+  finding_stores: { label: "Finding stores", color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
+  calling_stores: { label: "Calling stores", color: "text-cyan-400", bg: "bg-cyan-500/10 border-cyan-500/20" },
+  completed: { label: "Completed", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20" },
+  failed: { label: "Failed", color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" },
+};
+
+function timeAgo(dateStr?: string): string {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  sub?: string;
+  accent: string;
+}) {
+  return (
+    <Card className="relative overflow-hidden group hover:border-border/80 transition-colors">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground font-medium">{label}</p>
+            <p className="text-3xl font-bold tracking-tight">{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+          </div>
+          <div className={`p-2.5 rounded-xl ${accent}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OutcomesBar({ outcomes }: { outcomes: DashboardStats["call_outcomes"] }) {
+  const total = outcomes.available + outcomes.unavailable + outcomes.failed + outcomes.in_progress;
+  if (total === 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Call Outcomes</p>
+        <div className="h-3 rounded-full bg-muted/50" />
+        <p className="text-xs text-muted-foreground">No calls made yet</p>
+      </div>
+    );
+  }
+
+  const segments = [
+    { key: "available", value: outcomes.available, color: "bg-green-500", label: "Available" },
+    { key: "unavailable", value: outcomes.unavailable, color: "bg-red-400/80", label: "Unavailable" },
+    { key: "failed", value: outcomes.failed, color: "bg-muted-foreground/40", label: "No answer" },
+    { key: "in_progress", value: outcomes.in_progress, color: "bg-blue-400 animate-pulse", label: "In progress" },
+  ].filter((s) => s.value > 0);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Call Outcomes</p>
+        <p className="text-xs text-muted-foreground">{total} total calls</p>
+      </div>
+      <div className="h-3 rounded-full overflow-hidden flex bg-muted/50">
+        {segments.map((s) => (
+          <div
+            key={s.key}
+            className={`${s.color} transition-all duration-500`}
+            style={{ width: `${(s.value / total) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {segments.map((s) => (
+          <div key={s.key} className="flex items-center gap-1.5">
+            <div className={`h-2 w-2 rounded-full ${s.color.replace(" animate-pulse", "")}`} />
+            <span className="text-xs text-muted-foreground">
+              {s.label} ({s.value})
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActivityChart({ data }: { data: { day: string; count: number }[] }) {
+  if (data.length < 2) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Recent Activity
+        </p>
+        <div className="h-[120px] flex items-center justify-center">
+          <p className="text-xs text-muted-foreground">Not enough data yet</p>
+        </div>
+      </div>
+    );
+  }
+
+  const formatted = data.map((d) => ({
+    ...d,
+    label: new Date(d.day).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+    short: new Date(d.day).toLocaleDateString("en-US", { day: "numeric", month: "short" }),
+  }));
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        Recent Activity
+      </p>
+      <div className="h-[120px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={formatted} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="activityGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="oklch(0.488 0.243 264.376)" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="oklch(0.488 0.243 264.376)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis
+              dataKey="short"
+              tick={{ fontSize: 10, fill: "oklch(0.708 0 0)" }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: "oklch(0.708 0 0)" }}
+              axisLine={false}
+              tickLine={false}
+              allowDecimals={false}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "oklch(0.205 0 0)",
+                border: "1px solid oklch(1 0 0 / 10%)",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "oklch(0.985 0 0)",
+              }}
+              labelFormatter={(l) => l}
+              formatter={(value) => [`${value} queries`, ""]}
+            />
+            <Area
+              type="monotone"
+              dataKey="count"
+              stroke="oklch(0.488 0.243 264.376)"
+              strokeWidth={2}
+              fill="url(#activityGrad)"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function TicketRow({
+  ticket,
+  onClick,
+}: {
+  ticket: TicketListItem;
+  onClick: () => void;
+}) {
+  const config = STATUS_CONFIG[ticket.status] || STATUS_CONFIG.received;
+  const isActive = ["received", "analyzing", "researching", "finding_stores", "calling_stores"].includes(
+    ticket.status
+  );
+
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left group"
+    >
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors">
+        <div className={`h-2 w-2 rounded-full shrink-0 ${
+          isActive ? "bg-blue-400 animate-pulse" :
+          ticket.status === "completed" ? "bg-green-500" :
+          ticket.status === "failed" ? "bg-red-400" : "bg-muted-foreground"
+        }`} />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-muted-foreground">{ticket.ticket_id}</span>
+            <span className="text-sm font-medium truncate">
+              {ticket.product_name || ticket.query}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground truncate">{ticket.location}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          {ticket.total_calls > 0 && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Phone className="h-3 w-3" />
+              <span>{ticket.available_count}/{ticket.total_calls}</span>
+            </div>
+          )}
+          <Badge variant="outline" className={`text-[10px] border ${config.bg} ${config.color}`}>
+            {config.label}
+          </Badge>
+          <span className="text-[10px] text-muted-foreground w-14 text-right">
+            {timeAgo(ticket.created_at)}
+          </span>
+          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function EmptyState({ onNewQuery }: { onNewQuery: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div className="relative mb-6">
+        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500/20 to-violet-500/20 flex items-center justify-center">
+          <Search className="h-8 w-8 text-blue-400" />
+        </div>
+        <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-500/20 flex items-center justify-center">
+          <Phone className="h-4 w-4 text-green-400" />
+        </div>
+      </div>
+      <h3 className="text-lg font-semibold mb-1">No queries yet</h3>
+      <p className="text-sm text-muted-foreground text-center max-w-sm mb-6">
+        Tell us what you&apos;re looking for and where — our AI will call nearby stores
+        to check if they have it in stock.
+      </p>
+      <Button onClick={onNewQuery} className="gap-2">
+        <Zap className="h-4 w-4" />
+        Make your first query
+      </Button>
+    </div>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="p-4 space-y-2">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-7 w-14" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <Skeleton className="h-3 w-full rounded-full" />
+      <div className="space-y-1">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-14 w-full rounded-lg" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function Dashboard({
+  onNewQuery,
+  onViewTicket,
+}: {
+  onNewQuery: () => void;
+  onViewTicket: (ticketId: string) => void;
+}) {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [tickets, setTickets] = useState<TicketListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, t] = await Promise.all([getDashboardStats(), listTickets(20)]);
+      setStats(s);
+      setTickets(t.tickets);
+    } catch {
+      // backend might not be running yet
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Header onNewQuery={onNewQuery} onRefresh={refresh} />
+        <LoadingSkeleton />
+      </div>
+    );
+  }
+
+  if (!stats || tickets.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Header onNewQuery={onNewQuery} onRefresh={refresh} />
+        <EmptyState onNewQuery={onNewQuery} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <Header onNewQuery={onNewQuery} onRefresh={refresh} />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={BarChart3}
+          label="Total Queries"
+          value={stats.total_tickets}
+          sub={stats.in_progress > 0 ? `${stats.in_progress} active` : undefined}
+          accent="bg-blue-500/10 text-blue-400"
+        />
+        <StatCard
+          icon={PhoneCall}
+          label="Calls Made"
+          value={stats.total_calls}
+          sub={`${stats.stores_contacted} stores`}
+          accent="bg-violet-500/10 text-violet-400"
+        />
+        <StatCard
+          icon={Package}
+          label="Products Found"
+          value={stats.products_found}
+          accent="bg-green-500/10 text-green-400"
+        />
+        <StatCard
+          icon={TrendingUp}
+          label="Success Rate"
+          value={`${stats.success_rate}%`}
+          sub={`${stats.completed} completed`}
+          accent="bg-amber-500/10 text-amber-400"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardContent className="p-5">
+            <OutcomesBar outcomes={stats.call_outcomes} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <ActivityChart data={stats.daily_activity} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Recent Queries
+          </p>
+          <span className="text-xs text-muted-foreground">{tickets.length} queries</span>
+        </div>
+        <Card className="divide-y divide-border/50 overflow-hidden">
+          <CardContent className="p-0">
+            {tickets.map((ticket) => (
+              <TicketRow
+                key={ticket.ticket_id}
+                ticket={ticket}
+                onClick={() => onViewTicket(ticket.ticket_id)}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function Header({
+  onNewQuery,
+  onRefresh,
+}: {
+  onNewQuery: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="relative">
+      <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-64 h-32 bg-gradient-to-b from-blue-500/8 to-transparent rounded-full blur-3xl pointer-events-none" />
+      <div className="relative flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">
+            QuickStock
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            AI calls nearby stores to check availability
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={onRefresh} className="h-8 w-8">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Button onClick={onNewQuery} size="sm" className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            New Query
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

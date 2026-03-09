@@ -20,3 +20,5 @@ frontend/out/
 
 # OS
 .DS_Store
+
+test_pipeline.py
