@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#0F172A"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="12.5" stroke="url(#border)" stroke-width="1.5" fill="none"/>
+  <!-- Box/package shape -->
+  <path d="M32 14L48 22V42L32 50L16 42V22L32 14Z" stroke="url(#grad)" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+  <path d="M16 22L32 30L48 22" stroke="url(#grad)" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+  <path d="M32 30V50" stroke="url(#grad)" stroke-width="2.5" fill="none"/>
+  <!-- Lightning bolt for "Quick" -->
+  <path d="M35 22L29 33H35L29 44" stroke="#FACC15" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <defs>
+    <linearGradient id="grad" x1="16" y1="14" x2="48" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <linearGradient id="border" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#818CF8" stop-opacity="0.3"/>
+    </linearGradient>
+  </defs>
+</svg>

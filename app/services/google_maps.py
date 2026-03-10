@@ -2,6 +2,7 @@
 import logging
 import math
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import aiohttp
@@ -63,6 +64,7 @@ async def find_stores(
     search_queries: list[str] | None = None,
     specific_store_name: str | None = None,
     preferred_retailers: list[str] | None = None,
+    test_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Search Google Maps using multiple strategies and merge results.
@@ -245,19 +247,41 @@ async def find_stores(
         if len([s for s in stores if s.get("phone_number")]) >= max_stores:
             break
 
-    callable_stores = [
-        s for s in stores
-        if s.get("phone_number") and s.get("is_open_now") is not False
-    ]
-    closed_count = sum(
-        1 for s in stores
-        if s.get("phone_number") and s.get("is_open_now") is False
-    )
-    if closed_count:
-        logger.info(
-            "Ticket %s: skipped %d store(s) that Google Maps reports as currently closed",
-            ticket_id, closed_count,
-        )
+    if test_mode:
+        callable_stores = [s for s in stores if s.get("phone_number")]
+    else:
+        ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+        ist_minutes = ist_now.hour * 60 + ist_now.minute
+        in_fallback_window = 600 <= ist_minutes < 1350  # 10:00 AM – 10:30 PM IST
+
+        callable_stores = []
+        closed_count = 0
+        no_hours_skipped = 0
+        for s in stores:
+            if not s.get("phone_number"):
+                continue
+            open_now = s.get("is_open_now")
+            if open_now is True:
+                callable_stores.append(s)
+            elif open_now is False:
+                closed_count += 1
+            else:
+                # No hours data from Google Maps — use fallback window
+                if in_fallback_window:
+                    callable_stores.append(s)
+                else:
+                    no_hours_skipped += 1
+
+        if closed_count:
+            logger.info(
+                "Ticket %s: skipped %d store(s) that Google Maps reports as currently closed",
+                ticket_id, closed_count,
+            )
+        if no_hours_skipped:
+            logger.info(
+                "Ticket %s: skipped %d store(s) with no hours data (IST %s outside fallback window 10:00 AM–10:30 PM)",
+                ticket_id, no_hours_skipped, ist_now.strftime("%I:%M %p"),
+            )
 
     if specific_store_name and callable_stores:
         callable_stores.sort(key=lambda s: s.get("distance_km") or 9999)

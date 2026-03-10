@@ -278,6 +278,7 @@ async def _process_ticket(
             search_queries=search_queries,
             specific_store_name=specific_store_name,
             preferred_retailers=preferred_retailers,
+            test_mode=test_mode,
         )
         logger.info("Ticket %s: found %d callable stores", ticket_id, len(stores))
 

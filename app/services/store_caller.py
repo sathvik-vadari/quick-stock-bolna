@@ -89,16 +89,6 @@ async def call_stores(
     In test_mode: only places ONE call to test_phone (using the first store's
     context) so you can hear the bot without calling real stores.
     """
-    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
-    open_hour, close_hour, close_minute = 10, 22, 30  # 10:00 AM – 10:30 PM IST
-    ist_time = ist_now.hour * 60 + ist_now.minute
-    if ist_time < open_hour * 60 or ist_time >= close_hour * 60 + close_minute:
-        logger.warning(
-            "Ticket %s: skipping calls — IST time %s is outside calling window",
-            ticket_id, ist_now.strftime("%I:%M %p"),
-        )
-        return []
-
     stores = get_stores(ticket_id)
     if not stores:
         logger.warning("No stores to call for ticket %s", ticket_id)
