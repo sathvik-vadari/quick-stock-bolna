@@ -1,11 +1,87 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export type BackendStatus = "checking" | "online" | "offline";
+
+let _backendStatus: BackendStatus = "checking";
+const _listeners = new Set<(s: BackendStatus) => void>();
+
+export function getBackendStatus(): BackendStatus {
+  return _backendStatus;
+}
+
+function setBackendStatus(s: BackendStatus) {
+  if (s === _backendStatus) return;
+  _backendStatus = s;
+  _listeners.forEach((fn) => fn(s));
+}
+
+export function onBackendStatusChange(fn: (s: BackendStatus) => void): () => void {
+  _listeners.add(fn);
+  return () => _listeners.delete(fn);
+}
+
+export async function checkBackendHealth(): Promise<boolean> {
+  const tag = "%c[QuickStock Backend Health]";
+  const start = performance.now();
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    const elapsed = Math.round(performance.now() - start);
+
+    if (res.ok) {
+      console.log(
+        `${tag} %cONLINE %c(${elapsed}ms) — ${API_BASE}`,
+        "font-weight:bold",
+        "color:#22c55e;font-weight:bold",
+        "color:#888"
+      );
+      setBackendStatus("online");
+      return true;
+    }
+
+    console.warn(
+      `${tag} %cUNHEALTHY %c— HTTP ${res.status} (${elapsed}ms) — ${API_BASE}`,
+      "font-weight:bold",
+      "color:#f59e0b;font-weight:bold",
+      "color:#888"
+    );
+    setBackendStatus("offline");
+    return false;
+  } catch {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(
+      `${tag} %cOFFLINE %c(${elapsed}ms) — ${API_BASE}\n` +
+        `  ↳ The Azure backend appears to be stopped. Start it before using the app.`,
+      "font-weight:bold",
+      "color:#ef4444;font-weight:bold",
+      "color:#888"
+    );
+    setBackendStatus("offline");
+    return false;
+  }
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+  if (_backendStatus === "offline") {
+    throw new BackendOfflineError();
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
   return res.json() as Promise<T>;
+}
+
+export class BackendOfflineError extends Error {
+  constructor() {
+    super("Backend is offline");
+    this.name = "BackendOfflineError";
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────

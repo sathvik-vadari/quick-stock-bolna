@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   listTickets,
   getDashboardStats,
+  BackendOfflineError,
   type TicketListItem,
   type DashboardStats,
 } from "@/lib/api";
@@ -466,8 +467,9 @@ export function Dashboard({
         setTickets(t.tickets);
         if (isManual) toast.success("Dashboard refreshed");
       }
-    } catch {
-      if (isManual) toast.error("Could not reach server");
+    } catch (err) {
+      if (isManual && !(err instanceof BackendOfflineError))
+        toast.error("Could not reach server");
     } finally {
       setLoading(false);
       setRefreshing(false);
