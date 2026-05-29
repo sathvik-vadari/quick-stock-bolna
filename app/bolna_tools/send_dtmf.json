@@ -1,0 +1,32 @@
+{
+  "name": "send_dtmf",
+  "description": "Send DTMF keypad tones to navigate IVR automated phone menus during a live call. Use this when you hear a pre-recorded voice asking you to press a number (e.g. 'Press 1 for English', 'Press 2 for sales', 'For product inquiry press 3'). Pass the digit(s) you want to press. Also use this if you want to try pressing 0 to reach an operator.",
+  "pre_call_message": "",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "digits": {
+        "type": "string",
+        "description": "The DTMF digit(s) to send. Usually a single digit like '1', '2', '0', '*', '#'. Can also be multiple digits like '1234' for extension numbers."
+      },
+      "call_sid": {
+        "type": "string",
+        "description": "The telephony call identifier. This is automatically available as {call_sid}."
+      }
+    },
+    "required": ["digits", "call_sid"]
+  },
+  "key": "custom_task",
+  "value": {
+    "method": "POST",
+    "param": {
+      "digits": "%(digits)s",
+      "call_sid": "%(call_sid)s"
+    },
+    "url": "YOUR_BOLNA_SERVER_URL/api/dtmf/send",
+    "api_token": "Bearer YOUR_DTMF_API_TOKEN",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}

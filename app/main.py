@@ -10,7 +10,7 @@ from app.helpers.config import Config
 from app.helpers.logger import setup_logger
 from app.helpers.http_session import close_session
 from app.db.connection import init_db
-from app.routes import ticket_routes, bolna_webhook
+from app.routes import ticket_routes, bolna_webhook, dtmf_routes
 
 logger = setup_logger(__name__)
 
@@ -41,6 +41,7 @@ app.add_middleware(
 
 app.include_router(ticket_routes.router)
 app.include_router(bolna_webhook.router)
+app.include_router(dtmf_routes.router)
 
 
 @app.get("/")

@@ -18,6 +18,45 @@ logger = logging.getLogger(__name__)
 
 MAX_STORES = Config.MAX_STORES_TO_CALL
 
+# Known IVR navigation hints for major Indian chain stores.
+# Keyed by lowercase substrings that appear in the store name.
+_IVR_HINTS: dict[str, str] = {
+    "reliance digital": (
+        "HINT: Reliance Digital stores often have an IVR. "
+        "Listen for language selection first, then look for 'store inquiry' or 'product availability'. "
+        "If unsure, press 0 for operator."
+    ),
+    "croma": (
+        "HINT: Croma stores may route through Tata's customer service IVR. "
+        "Look for 'store assistance' or 'product inquiry'. Press 0 if stuck."
+    ),
+    "vijay sales": (
+        "HINT: Vijay Sales may have a simple IVR. "
+        "Press 0 or wait to be connected to the store directly."
+    ),
+    "samsung": (
+        "HINT: Samsung service centers have multi-level IVR. "
+        "Look for 'product information' or 'sales'. Avoid 'service/repair' options."
+    ),
+    "lg": (
+        "HINT: LG customer care has IVR. "
+        "Choose 'product inquiry' or 'sales'. Avoid 'complaint' or 'service' options."
+    ),
+    "apple": (
+        "HINT: Apple stores route through Apple support IVR. "
+        "Look for 'retail store' or 'product availability'."
+    ),
+}
+
+
+def _get_ivr_hint(store_name: str) -> str:
+    """Return an IVR navigation hint if this looks like a known chain store."""
+    name_lower = store_name.lower()
+    for pattern, hint in _IVR_HINTS.items():
+        if pattern in name_lower:
+            return hint
+    return ""
+
 
 def _build_user_data(
     product: dict[str, Any],
@@ -45,6 +84,8 @@ def _build_user_data(
 
     greeting = region.get("greeting", "Namaste ji!").replace("{customer_name}", customer_name)
 
+    ivr_hint = _get_ivr_hint(store["store_name"])
+
     return {
         # Routing — used by webhook to match call to ticket
         "ticket_id": ticket_id,
@@ -67,6 +108,9 @@ def _build_user_data(
         "greeting": greeting,
         "thank_you": region.get("thank_you", "Bahut dhanyavaad ji!"),
         "busy_response": region.get("busy_response", "Koi baat nahi ji!"),
+
+        # IVR navigation hint for chain stores
+        "ivr_navigation_hint": ivr_hint,
 
         # Meta
         "current_datetime": current_datetime,

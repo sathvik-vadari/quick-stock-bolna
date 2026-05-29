@@ -49,6 +49,20 @@ QuickStock is a voice AI platform where users submit a product query + location,
 9. Once all calls are complete, `_compile_final_result` scores and ranks stores, saves to DB
 10. Frontend polls `GET /api/ticket/{id}` for progress, then fetches `GET /api/ticket/{id}/options` for final results
 
+### DTMF / IVR Navigation
+
+When calling chain stores, the bot may encounter IVR (automated phone menus). The system handles this via:
+
+1. **Bolna custom function tool** (`send_dtmf`) — configured on the Bolna dashboard using the JSON template in `app/bolna_tools/send_dtmf.json`
+2. **Backend DTMF endpoint** (`POST /api/dtmf/send` in `app/routes/dtmf_routes.py`) — receives the call_sid + digits from Bolna
+3. **DTMF service** (`app/services/dtmf_service.py`) — sends DTMF tones via the telephony provider's API (Plivo `play_dtmf` or Twilio call update)
+4. **Agent prompt** (`app/prompts/store_caller.txt`) — contains IVR navigation instructions telling the LLM when/how to use `@send_dtmf`
+5. **IVR hints** (`_IVR_HINTS` in `store_caller.py`) — pre-configured navigation hints for known chain stores, passed via `{ivr_navigation_hint}` template var
+
+**Plivo is strongly recommended** — its `play_dtmf` API injects tones without disrupting the real-time audio pipeline. Twilio's TwiML-update approach may briefly interrupt Bolna's bidirectional audio.
+
+To enable: set `TELEPHONY_PROVIDER`, telephony credentials, and `DTMF_API_TOKEN` in `.env`, then add the `send_dtmf` custom function to your Bolna agent (update the URL/token in the JSON template).
+
 ### Key Design Patterns
 
 - **Ticket ID format**: `TKT-001`, `TKT-002`, etc. — sequentially generated from DB
@@ -83,3 +97,7 @@ Copy `.env.example` to `.env`. Key variables:
 - `GOOGLE_MAPS_API_KEY`, `GEMINI_API_KEY` — Google services
 - `MAX_STORES_TO_CALL` — cap on parallel Bolna calls per ticket (default: 4)
 - `TEST_MODE=true` + `TEST_PHONE` — call your own number instead of real stores
+- `TELEPHONY_PROVIDER` — `plivo` (recommended) or `twilio` for DTMF/IVR support
+- `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN` — Plivo credentials for sending DTMF
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` — Twilio credentials (if using Twilio)
+- `DTMF_API_TOKEN` — shared secret authenticating Bolna → QuickStock DTMF calls
