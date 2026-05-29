@@ -489,7 +489,7 @@ export function Dashboard({
     );
   }
 
-  if (!stats || tickets.length === 0) {
+  if (!stats || !tickets?.length) {
     return (
       <div className="space-y-6">
         <Header onNewQuery={onNewQuery} onRefresh={refresh} refreshing={refreshing} />

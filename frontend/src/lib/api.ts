@@ -1,4 +1,10 @@
+import * as demo from "./demo-data";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// When the live backend is offline, serve realistic sample data so the portfolio
+// build stays fully explorable. Flip to false to force live-only behaviour.
+const DEMO_FALLBACK = true;
 
 export type BackendStatus = "checking" | "online" | "offline";
 
@@ -66,15 +72,60 @@ export async function checkBackendHealth(): Promise<boolean> {
   }
 }
 
+// Run the health check exactly once and share the result. API calls await this
+// so they know whether to hit the network or serve demo data — no polling.
+let _healthPromise: Promise<boolean> | null = null;
+export function ensureHealthChecked(): Promise<boolean> {
+  if (!_healthPromise) _healthPromise = checkBackendHealth();
+  return _healthPromise;
+}
+
+export function isDemoMode(): boolean {
+  return DEMO_FALLBACK && _backendStatus === "offline";
+}
+
+const demoDelay = (ms = 350) => new Promise((r) => setTimeout(r, ms));
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   if (_backendStatus === "offline") {
     throw new BackendOfflineError();
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...opts,
-    headers: { "Content-Type": "application/json", ...opts?.headers },
-  });
-  return res.json() as Promise<T>;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...opts,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...opts?.headers },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Try the live backend; if it's unreachable OR returns a response that doesn't
+// look like valid QuickStock data (e.g. another server is on the same port, or
+// the backend is paused), fall back to demo data and surface the demo badge.
+async function liveOrDemo<T>(
+  fetcher: () => Promise<T>,
+  isValid: (v: T) => boolean,
+  demoValue: () => T
+): Promise<T> {
+  await ensureHealthChecked();
+  if (isDemoMode()) {
+    await demoDelay();
+    return demoValue();
+  }
+  try {
+    const v = await fetcher();
+    if (!isValid(v)) throw new Error("malformed response");
+    return v;
+  } catch {
+    setBackendStatus("offline"); // serve demo data + show the demo badge
+    return demoValue();
+  }
 }
 
 export class BackendOfflineError extends Error {
@@ -243,15 +294,27 @@ export interface DashboardStats {
 // ── API Functions ──────────────────────────────────────────────────────────
 
 export function createTicket(data: TicketRequest): Promise<TicketResponse> {
-  return request("/api/ticket", { method: "POST", body: JSON.stringify(data) });
+  return liveOrDemo(
+    () => request<TicketResponse>("/api/ticket", { method: "POST", body: JSON.stringify(data) }),
+    (v) => !!v && typeof v.status === "string",
+    () => demo.createDemoTicket(data)
+  );
 }
 
 export function getTicketStatus(ticketId: string): Promise<TicketStatus> {
-  return request(`/api/ticket/${ticketId}`);
+  return liveOrDemo(
+    () => request<TicketStatus>(`/api/ticket/${ticketId}`),
+    (v) => !!v && typeof v.ticket_id === "string",
+    () => demo.getDemoTicketStatus(ticketId)
+  );
 }
 
 export function getTicketOptions(ticketId: string): Promise<OptionsResponse> {
-  return request(`/api/ticket/${ticketId}/options`);
+  return liveOrDemo(
+    () => request<OptionsResponse>(`/api/ticket/${ticketId}/options`),
+    (v) => !!v && (typeof v.ticket_id === "string" || Array.isArray(v.options)),
+    () => demo.getDemoOptions(ticketId)
+  );
 }
 
 export function subscribeToTicket(
@@ -259,6 +322,9 @@ export function subscribeToTicket(
   onUpdate: (status: TicketStatus) => void,
   onError?: () => void
 ): () => void {
+  if (isDemoMode()) {
+    return demo.simulateDemoTicket(ticketId, onUpdate);
+  }
   const url = `${API_BASE}/api/ticket/${ticketId}/events`;
   const es = new EventSource(url);
 
@@ -282,9 +348,17 @@ export function listTickets(
   limit = 50,
   offset = 0
 ): Promise<{ tickets: TicketListItem[]; count: number }> {
-  return request(`/api/tickets?limit=${limit}&offset=${offset}`);
+  return liveOrDemo(
+    () => request<{ tickets: TicketListItem[]; count: number }>(`/api/tickets?limit=${limit}&offset=${offset}`),
+    (v) => !!v && Array.isArray(v.tickets),
+    () => ({ tickets: demo.DEMO_TICKET_LIST, count: demo.DEMO_TICKET_LIST.length })
+  );
 }
 
 export function getDashboardStats(): Promise<DashboardStats> {
-  return request("/api/dashboard");
+  return liveOrDemo(
+    () => request<DashboardStats>("/api/dashboard"),
+    (v) => !!v && typeof v.total_tickets === "number",
+    () => demo.DEMO_DASHBOARD_STATS
+  );
 }

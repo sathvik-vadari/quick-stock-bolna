@@ -257,10 +257,10 @@ function TranscriptDialog({
 }
 
 function CallsProgress({ status }: { status: TicketStatus }) {
+  const [selectedCall, setSelectedCall] = useState<StoreCall | null>(null);
   const calls = status.store_calls;
   if (!calls?.length) return null;
   const prog = status.progress;
-  const [selectedCall, setSelectedCall] = useState<StoreCall | null>(null);
 
   return (
     <div className="space-y-2">
